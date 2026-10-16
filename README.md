@@ -19,6 +19,45 @@ python scripts/download_data.py
 
 Files are saved to `data/raw/` and checked automatically (row counts and timestamps).
 
+## Running the pipeline
+
+```bash
+python -m src.pipeline                  # full run: validation, cleaning, features, all models
+python -m src.pipeline --no-baselines   # only the improved model (faster)
+```
+
+One command runs every step and writes:
+
+| Output | Location |
+|---|---|
+| Cleaned data and model features | `data/processed/*.parquet` |
+| Trained model | `models/lgbm_improved.txt` |
+| Metrics (validation, rows removed, model scores) | `reports/metrics.json` |
+| Cleaning summary, model comparison, error by trip length, weather analysis | `reports/*.csv` |
+| Figures | `reports/figures/` |
+
+All thresholds and model settings are in [`config.yaml`](config.yaml).
+
+## Project structure
+
+```
+├── config.yaml              # paths, validation and cleaning thresholds, model settings
+├── scripts/download_data.py # downloads and verifies the raw data from Kaggle
+├── src/
+│   ├── config.py            # loads config.yaml
+│   ├── etl.py               # load, validate, clean
+│   ├── features.py          # feature engineering (16 features, no target leakage)
+│   ├── train.py             # shared train/test split, models, evaluation
+│   ├── weather.py           # Central Park weather analysis
+│   ├── plots.py             # figures
+│   └── pipeline.py          # runs everything: python -m src.pipeline
+├── sql/                     # (in progress) DuckDB SQL analytics
+├── tests/                   # (in progress) data validation and unit tests
+├── api/                     # (in progress) prediction API
+├── notebooks/               # exploration
+└── reports/figures/         # generated figures
+```
+
 ## Data sources
 
 - [NYC Taxi Trip Duration](https://www.kaggle.com/competitions/nyc-taxi-trip-duration) – Kaggle competition data
