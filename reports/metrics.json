@@ -1,0 +1,67 @@
+{
+  "run_at_utc": "2026-10-16T02:17:20+00:00",
+  "validation": {
+    "rows": 1458644,
+    "missing_values": 0,
+    "duplicate_ids": 0,
+    "duration_mismatch_pct": 0.0,
+    "pickup_min": "2016-01-01 00:00:17",
+    "pickup_max": "2016-06-30 23:59:39"
+  },
+  "rows_raw": 1458644,
+  "rows_removed": 15704,
+  "rows_clean": 1442940,
+  "n_features": 16,
+  "improved_model": {
+    "model": "Improved LightGBM (tuned)",
+    "n_features": 16,
+    "mae_s": 171.0,
+    "rmse_s": 296.9,
+    "rmsle": 0.3103,
+    "r2": 0.799,
+    "best_iteration": 1566
+  },
+  "comparison": [
+    {
+      "model": "Template LightGBM (with speed_kmph leak)",
+      "n_features": 6,
+      "mae_s": 17.3,
+      "rmse_s": 70.9,
+      "rmsle": 0.0603,
+      "r2": 0.989
+    },
+    {
+      "model": "LightGBM, no leak",
+      "n_features": 5,
+      "mae_s": 223.9,
+      "rmse_s": 357.9,
+      "rmsle": 0.3934,
+      "r2": 0.708
+    },
+    {
+      "model": "LightGBM + engineered features (template settings)",
+      "n_features": 16,
+      "mae_s": 181.4,
+      "rmse_s": 311.6,
+      "rmsle": 0.323,
+      "r2": 0.778
+    },
+    {
+      "model": "Improved LightGBM (tuned)",
+      "n_features": 16,
+      "mae_s": 171.0,
+      "rmse_s": 296.9,
+      "rmsle": 0.3103,
+      "r2": 0.799
+    },
+    {
+      "model": "Linear Regression",
+      "n_features": 16,
+      "mae_s": 262.9,
+      "rmse_s": 425.7,
+      "rmsle": 0.4332,
+      "r2": 0.587
+    }
+  ],
+  "runtime_s": 19.5
+}
