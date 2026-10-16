@@ -3,7 +3,7 @@
     python -m src.pipeline                   # everything
     python -m src.pipeline --no-baselines    # only the improved model (faster)
 
-Steps: load -> validate -> clean -> features -> train/evaluate -> weather analysis -> save outputs.
+Steps: load -> validate -> clean (SQL) -> features -> train/evaluate -> SQL analytics -> save outputs.
 """
 
 import argparse
@@ -12,10 +12,13 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from src import etl, features, plots, train, weather
+from src import db, etl, features, plots, train
 from src.config import load_config
 
 log = logging.getLogger("pipeline")
+
+ANALYSIS_QUERIES = ["03_daily_kpis.sql", "04_rolling_7day.sql", "05_slowest_days.sql",
+                    "06_weather_impact.sql", "07_hourly_by_weekday.sql"]
 
 
 def main() -> None:
@@ -38,9 +41,11 @@ def main() -> None:
     raw = etl.load_raw(p["raw_trips"])
     validation = etl.validate_raw(raw, cfg)
 
-    # 2. Clean
-    raw = etl.add_distance(raw)
-    clean, cleaning_summary = etl.clean(raw, cfg)
+    # 2. Clean with SQL (DuckDB), optionally verified against the pandas implementation
+    con = db.connect()
+    clean, cleaning_summary = etl.clean_sql(raw, cfg, con)
+    if cfg["cleaning"].get("verify_with_pandas", True):
+        etl.verify_sql_matches_pandas(raw, clean, cleaning_summary, cfg)
     cleaning_summary.to_csv(p["reports_dir"] / "cleaning_summary.csv", index=False)
     plots.duration_before_after(raw["trip_duration"], clean["trip_duration"],
                                 p["figures_dir"] / "duration_before_after.png")
@@ -64,16 +69,23 @@ def main() -> None:
     importance.to_csv(p["reports_dir"] / "feature_importance.csv", index=False)
     plots.predicted_vs_actual(y_test, results["test_pred_sec"], p["figures_dir"] / "predicted_vs_actual.png")
 
-    # 5. Weather analysis (not a model input)
+    # 5. SQL analytics on the Parquet features + weather (not model inputs)
     if p["raw_weather"].exists():
-        w = weather.load_weather(p["raw_weather"])
-        daily, rainy_vs_dry = weather.daily_weather_summary(feats, w)
-        daily.to_csv(p["reports_dir"] / "daily_weather_speed.csv", index=False)
-        rainy_vs_dry.to_csv(p["reports_dir"] / "rainy_vs_dry.csv")
-        slowest = daily.nsmallest(3, "median_speed_kmh")[["date", "median_speed_kmh", "snow_depth_cm"]]
-        log.info("Slowest days:\n%s", slowest.to_string(index=False))
+        sql_reports = p["reports_dir"] / "sql"
+        sql_reports.mkdir(exist_ok=True)
+        db.execute(con, "02_views.sql", {"features_path": p["processed_dir"] / "features.parquet",
+                                         "weather_path": p["raw_weather"]})
+        for name in ANALYSIS_QUERIES:
+            result = db.query(con, name)
+            result.to_csv(sql_reports / name.replace(".sql", ".csv"), index=False)
+            if name == "05_slowest_days.sql":
+                log.info("Slowest days:\n%s", result.head(3)[["overall_rank", "date", "median_speed_kmh",
+                                                                "snow_depth_cm"]].to_string(index=False))
+            if name == "06_weather_impact.sql":
+                log.info("Weather impact:\n%s", result.to_string(index=False))
     else:
-        log.warning("Weather file not found (%s) - skipping weather analysis", p["raw_weather"])
+        log.warning("Weather file not found (%s) - skipping SQL analytics", p["raw_weather"])
+    con.close()
 
     # 6. Metrics file
     metrics = {
