@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------
+# Pipeline configuration. Every threshold and setting lives here,
+# so the code never hard-codes numbers.
+# Paths are relative to the project root.
+# ---------------------------------------------------------------
+
+paths:
+  raw_trips: data/raw/train.csv
+  raw_weather: data/raw/weather_nyc_centralpark_2016.csv
+  processed_dir: data/processed
+  models_dir: models
+  reports_dir: reports
+  figures_dir: reports/figures
+
+validation:
+  expected_rows: 1458644          # rows in the original Kaggle train.csv
+  excel_row_limit: 1048575        # a file with exactly this many rows was truncated by Excel
+  max_duration_mismatch_pct: 0.1  # max % of rows where dropoff - pickup != trip_duration
+
+cleaning:                         # rows breaking any rule are removed
+  min_duration_s: 60              # shorter: cancellations / meter errors
+  max_duration_s: 21600           # longer than 6 h: forgotten meters
+  min_distance_km: 1.0e-6         # at or below: pickup == dropoff (GPS error / cancelled)
+  min_passengers: 1               # 0 passengers is not a valid trip
+  nyc_bbox:                       # pickup AND dropoff must be inside this box
+    lat_min: 40.5
+    lat_max: 41.0
+    lon_min: -74.3
+    lon_max: -73.7
+
+features:
+  rush_hours: [7, 8, 9, 16, 17, 18, 19]   # weekday rush-hour windows
+  airport_radius_km: 2.0
+  airports:                                # [latitude, longitude]
+    JFK: [40.6413, -73.7781]
+    LGA: [40.7769, -73.8740]
+
+model:
+  random_state: 42
+  sample_frac: 0.25               # share of cleaned trips used for modelling
+  test_size: 0.2                  # share of the sample held out as the test set
+  validation_size: 0.1            # share of the training set used for early stopping
+  template:                       # starter-template LightGBM (baselines)
+    num_boost_round: 200
+    early_stopping_rounds: 20
+    params:
+      objective: regression
+      metric: rmse
+      learning_rate: 0.1
+      num_leaves: 31
+      verbosity: -1
+  improved:                       # tuned LightGBM (main model)
+    num_boost_round: 2000
+    early_stopping_rounds: 50
+    params:
+      objective: regression
+      metric: rmse
+      learning_rate: 0.05
+      num_leaves: 64
+      min_data_in_leaf: 50
+      feature_fraction: 0.8
+      bagging_fraction: 0.8
+      bagging_freq: 1
+      verbosity: -1
+
+experiments:
+  run_baselines: true             # also train leaky / no-leak / linear models for comparison
