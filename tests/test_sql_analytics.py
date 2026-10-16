@@ -58,3 +58,10 @@ def test_render_rejects_missing_parameter():
 def test_render_rejects_text_parameters():
     with pytest.raises(TypeError):
         db.render("SELECT {{ x }}", {"x": "1; DROP TABLE trips"})
+
+
+def test_speed_by_area_grid(analytics_con):
+    grid = db.query(analytics_con, "08_speed_by_area.sql", {"cell_deg": 0.01, "min_trips": 1})
+    assert grid["trips"].sum() == 961                       # every clean trip lands in exactly one cell
+    assert grid["median_speed_kmh"].gt(0).all()
+    assert grid["median_speed_kmh"].is_monotonic_increasing  # slowest areas first
