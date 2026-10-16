@@ -64,10 +64,11 @@ def main() -> None:
     rows = []
     con = duckdb.connect()
     for name, (csv_path, parquet_path, read_csv) in datasets.items():
-        csv_load = timed(lambda: read_csv(csv_path))
-        pq_load = timed(lambda: pd.read_parquet(parquet_path))
-        csv_q = timed(lambda: con.sql(query.format(src=f"read_csv('{csv_path.as_posix()}')")).fetchall())
-        pq_q = timed(lambda: con.sql(query.format(src=f"read_parquet('{parquet_path.as_posix()}')")).fetchall())
+        # default arguments bind the current loop values into each lambda
+        csv_load = timed(lambda f=csv_path, read=read_csv: read(f))
+        pq_load = timed(lambda f=parquet_path: pd.read_parquet(f))
+        csv_q = timed(lambda f=csv_path: con.sql(query.format(src=f"read_csv('{f.as_posix()}')")).fetchall())
+        pq_q = timed(lambda f=parquet_path: con.sql(query.format(src=f"read_parquet('{f.as_posix()}')")).fetchall())
         rows.append({
             "dataset": name,
             "csv_mb": round(size_mb(csv_path), 1), "parquet_mb": round(size_mb(parquet_path), 1),

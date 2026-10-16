@@ -6,6 +6,7 @@ numpy>=2.0          # numpy 2 rules are needed to reproduce the published row co
 pandas>=2.0
 pyarrow>=14.0       # Parquet files
 duckdb>=1.0         # SQL engine (cleaning + analytics)
+pandera>=0.20       # data contracts
 pyyaml>=6.0
 
 # Modelling
