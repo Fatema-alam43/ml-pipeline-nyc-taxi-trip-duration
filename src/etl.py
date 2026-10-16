@@ -41,7 +41,15 @@ def load_raw(path) -> pd.DataFrame:
 
 
 def validate_raw(df: pd.DataFrame, cfg: dict) -> dict:
-    """Check the raw file is complete and correctly parsed. Raises DataValidationError on failure."""
+    """Check the raw file is complete, well-formed and correctly parsed.
+
+    Raises DataValidationError on failure. Checks, in order:
+      1. Row count: exactly Excel's limit means the file was truncated by Excel
+      2. Data contract (pandera RAW schema): columns, types, unique ids, plausible values
+      3. Timestamps: dropoff - pickup must equal trip_duration
+    """
+    from src import schemas  # local import: pandera is only needed when validating
+
     v = cfg["validation"]
     rows = len(df)
 
@@ -52,10 +60,11 @@ def validate_raw(df: pd.DataFrame, cfg: dict) -> dict:
     if rows != v["expected_rows"]:
         log.warning("Expected %s rows but found %s", f"{v['expected_rows']:,}", f"{rows:,}")
 
-    missing = int(df.isna().sum().sum())
-    duplicate_ids = int(df["id"].duplicated().sum())
+    try:
+        schemas.validate(schemas.raw_schema(), df)
+    except schemas.pa.errors.SchemaErrors as err:
+        raise DataValidationError(f"Raw data breaks the data contract:\n{err.failure_cases.head(20)}") from err
 
-    # dropoff - pickup must equal trip_duration if the timestamps were parsed correctly
     computed = (df["dropoff_datetime"] - df["pickup_datetime"]).dt.total_seconds()
     mismatch_pct = float(((computed - df["trip_duration"]).abs() > 1).mean() * 100)
     if mismatch_pct > v["max_duration_mismatch_pct"]:
@@ -63,7 +72,8 @@ def validate_raw(df: pd.DataFrame, cfg: dict) -> dict:
             f"{mismatch_pct:.2f}% of rows have dropoff - pickup != trip_duration: "
             "timestamps are damaged (e.g. seconds lost after saving in Excel).")
 
-    report = {"rows": rows, "missing_values": missing, "duplicate_ids": duplicate_ids,
+    report = {"rows": rows, "missing_values": int(df.isna().sum().sum()),
+              "duplicate_ids": int(df["id"].duplicated().sum()),
               "duration_mismatch_pct": round(mismatch_pct, 4),
               "pickup_min": str(df["pickup_datetime"].min()),
               "pickup_max": str(df["pickup_datetime"].max())}

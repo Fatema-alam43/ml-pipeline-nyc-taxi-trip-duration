@@ -12,7 +12,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from src import db, etl, features, plots, train
+from src import db, etl, features, plots, schemas, train
 from src.config import load_config
 
 log = logging.getLogger("pipeline")
@@ -46,6 +46,8 @@ def main() -> None:
     clean, cleaning_summary = etl.clean_sql(raw, cfg, con)
     if cfg["cleaning"].get("verify_with_pandas", True):
         etl.verify_sql_matches_pandas(raw, clean, cleaning_summary, cfg)
+    schemas.validate(schemas.clean_schema(cfg), clean)
+    log.info("Clean data passed the CLEAN data contract")
     cleaning_summary.to_csv(p["reports_dir"] / "cleaning_summary.csv", index=False)
     plots.duration_before_after(raw["trip_duration"], clean["trip_duration"],
                                 p["figures_dir"] / "duration_before_after.png")
@@ -55,6 +57,8 @@ def main() -> None:
 
     # 3. Features
     feats = features.build_features(clean, cfg)
+    schemas.validate(schemas.features_schema(), feats)
+    log.info("Features passed the FEATURES data contract")
     feats.to_parquet(p["processed_dir"] / "features.parquet", index=False)
     log.info("Features: %s rows x %d features", f"{len(feats):,}", len(features.FEATURES))
 

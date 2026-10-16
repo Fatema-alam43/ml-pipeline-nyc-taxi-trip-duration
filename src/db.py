@@ -25,7 +25,7 @@ def render(sql: str, params: dict | None = None) -> str:
         value = params[name]
         if isinstance(value, Path):
             return value.as_posix().replace("'", "''")
-        if isinstance(value, (int, float)):
+        if isinstance(value, int | float):
             return repr(value)
         raise TypeError(f"Parameter '{name}' must be a number or a path, got {type(value).__name__}")
 
