@@ -11,6 +11,8 @@ paths:
   models_dir: models
   reports_dir: reports
   figures_dir: reports/figures
+  mlflow_db: mlflow.db            # MLflow run history (SQLite)
+  mlflow_artifacts: mlruns        # MLflow model files and logged artifacts
 
 validation:
   expected_rows: 1458644          # rows in the original Kaggle train.csv
@@ -64,5 +66,22 @@ model:
       bagging_freq: 1
       verbosity: -1
 
+evaluation:
+  time_split_test_start: "2016-06-01"   # time-based split: train before this date, test from it
+
 experiments:
   run_baselines: true             # also train leaky / no-leak / linear models for comparison
+  run_time_split: true            # also evaluate on a time-based split (train Jan-May, test June)
+  run_weather: true               # also test real weather features and a day-of-year control
+
+mlflow:
+  enabled: true
+  experiment: nyc-taxi-trip-duration
+  log_models: true                # save every trained model in MLflow
+
+explain:
+  shap_sample: 2000               # test trips used for the SHAP plots
+
+speed_map:
+  cell_deg: 0.005                 # grid cell size (about 550 m x 420 m)
+  min_trips: 30                   # hide cells with fewer pickups than this
