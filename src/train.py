@@ -33,6 +33,35 @@ def make_split(features_df: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame, pd.D
     return train, test
 
 
+def make_time_split(features_df: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Same sample as make_split, but split by date: train before the cut-off, test from it.
+
+    This mimics real use: the model only ever predicts trips from days it has never seen.
+    """
+    m = cfg["model"]
+    cutoff = pd.Timestamp(cfg["evaluation"]["time_split_test_start"])
+    sample = features_df.sample(frac=m["sample_frac"], random_state=m["random_state"]).reset_index(drop=True)
+    is_test = sample["pickup_datetime"] >= cutoff
+    train, test = sample.loc[~is_test], sample.loc[is_test]
+    log.info("Time split at %s -> train %s | test %s", cutoff.date(), f"{len(train):,}", f"{len(test):,}")
+    return train, test
+
+
+WEATHER_FEATURES = ["precip_mm", "snow_cm", "snow_depth_cm", "temp_mean_c"]
+
+
+def add_day_features(features_df: pd.DataFrame, weather: pd.DataFrame | None) -> pd.DataFrame:
+    """Add daily weather and day-of-year columns, matched on the pickup date (row order unchanged)."""
+    df = features_df.copy()
+    day = df["pickup_datetime"].dt.normalize()
+    df["pickup_dayofyear"] = df["pickup_datetime"].dt.dayofyear.astype("int16")
+    if weather is not None:
+        w = weather.assign(date=pd.to_datetime(weather["date"])).set_index("date")
+        for col in WEATHER_FEATURES:
+            df[col] = day.map(w[col]).astype("float32")
+    return df
+
+
 def score(y_true_sec: np.ndarray, pred_log: np.ndarray) -> dict:
     """Metrics from log-space predictions: MAE/RMSE in seconds, RMSLE, R2."""
     pred = np.expm1(pred_log)
@@ -60,18 +89,31 @@ def train_template(train, test, features, cfg):
     return model, model.predict(test[features], num_iteration=model.best_iteration)
 
 
-def train_improved(train, cfg):
-    """Tuned LightGBM, early-stopping on a validation split of the TRAINING data (test set untouched)."""
+def train_improved(train, cfg, features=None, validation="random"):
+    """Tuned LightGBM, early-stopping on a validation split of the TRAINING data (test set untouched).
+
+    validation="random": a random 10% of the training trips (random-split experiments)
+    validation="time":   the latest 10% of the training trips (time-split experiments, no peeking ahead)
+    """
+    features = features or FEATURES
     m, imp = cfg["model"], cfg["model"]["improved"]
-    X_fit, X_val, y_fit, y_val = train_test_split(
-        train[FEATURES], np.log1p(train["trip_duration"]),
-        test_size=m["validation_size"], random_state=m["random_state"])
+    y = np.log1p(train["trip_duration"])
+    if validation == "time":
+        order = train["pickup_datetime"].argsort(kind="stable").values
+        cut = int(len(train) * (1 - m["validation_size"]))
+        fit_idx, val_idx = order[:cut], order[cut:]
+        X_fit, X_val = train[features].iloc[fit_idx], train[features].iloc[val_idx]
+        y_fit, y_val = y.iloc[fit_idx], y.iloc[val_idx]
+    else:
+        X_fit, X_val, y_fit, y_val = train_test_split(
+            train[features], y, test_size=m["validation_size"], random_state=m["random_state"])
     fit_set = lgb.Dataset(X_fit, label=y_fit)
     val_set = lgb.Dataset(X_val, label=y_val, reference=fit_set)
     model = lgb.train(_params(imp, m["random_state"]), fit_set,
                       num_boost_round=imp["num_boost_round"], valid_sets=[val_set],
                       callbacks=[lgb.early_stopping(imp["early_stopping_rounds"], verbose=False)])
-    log.info("Improved model: best iteration %d", model.best_iteration)
+    log.info("Improved model (%d features, %s validation): best iteration %d",
+             len(features), validation, model.best_iteration)
     return model
 
 
@@ -96,33 +138,84 @@ def add_leaky_speed(df):
     return df
 
 
-def run_experiments(features_df: pd.DataFrame, cfg: dict) -> dict:
-    """Train the improved model (and, optionally, the baselines) and evaluate on the shared test set."""
-    train, test = make_split(features_df, cfg)
-    y_test = test["trip_duration"].values
+def run_experiments(features_df: pd.DataFrame, cfg: dict, weather: pd.DataFrame | None = None,
+                    tracker=None) -> dict:
+    """Train and evaluate every model, log each run to MLflow, and return the results.
+
+    Random split (as in the course): baselines, the improved model, Linear Regression, weather variants.
+    Time split (train Jan-May, test June): the improved model and weather variants.
+    """
+    exp = cfg["experiments"]
+    data = add_day_features(features_df, weather) if exp.get("run_weather") else features_df
     rows = []
 
-    if cfg["experiments"]["run_baselines"]:
+    def record(name, split, feats, model, kind, y_true, pred_log, params, test=None, extra=None):
+        metrics = score(y_true, pred_log)
+        rows.append({"model": name, "split": split, "n_features": len(feats), **metrics, **(extra or {})})
+        log.info("[%s] %s: MAE %.1f s, R2 %.3f", split, name, metrics["mae_s"], metrics["r2"])
+        if tracker is not None:
+            example = test[feats].head(5) if (test is not None and kind == "lightgbm") else None
+            tracker.log_run(name, split=split, model=model, kind=kind, features=feats,
+                            params=params, metrics={**metrics, **(extra or {})}, input_example=example)
+        return metrics
+
+    template_params = {**cfg["model"]["template"]["params"],
+                       "num_boost_round": cfg["model"]["template"]["num_boost_round"]}
+    improved_params = {**cfg["model"]["improved"]["params"],
+                       "num_boost_round": cfg["model"]["improved"]["num_boost_round"]}
+
+    # ---------------- Random split ----------------
+    train, test = make_split(data, cfg)
+    y_test = test["trip_duration"].values
+
+    if exp["run_baselines"]:
         train_l, test_l = add_leaky_speed(train), add_leaky_speed(test)
         for name, feats in [("Template LightGBM (with speed_kmph leak)", TEMPLATE_FEATURES),
                             ("LightGBM, no leak", NO_LEAK_FEATURES),
                             ("LightGBM + engineered features (template settings)", FEATURES)]:
-            _, pred = train_template(train_l, test_l, feats, cfg)
-            rows.append({"model": name, "n_features": len(feats), **score(y_test, pred)})
-            log.info("%s: %s", name, rows[-1])
+            model, pred = train_template(train_l, test_l, feats, cfg)
+            record(name, "random", feats, model, "lightgbm", y_test, pred, template_params, test_l)
 
     model = train_improved(train, cfg)
     pred_log = model.predict(test[FEATURES], num_iteration=model.best_iteration)
-    improved = {"model": "Improved LightGBM (tuned)", "n_features": len(FEATURES), **score(y_test, pred_log)}
-    rows.append(improved)
-    log.info("Improved LightGBM: %s", improved)
+    june = (test["pickup_datetime"] >= pd.Timestamp(cfg["evaluation"]["time_split_test_start"])).values
+    june_metrics = score(y_test[june], pred_log[june]) if june.any() else {}
+    improved = record("Improved LightGBM (tuned)", "random", FEATURES, model, "lightgbm", y_test, pred_log,
+                      {**improved_params, "best_iteration": model.best_iteration}, test,
+                      extra={f"june_only_{k}": v for k, v in june_metrics.items()})
 
-    if cfg["experiments"]["run_baselines"]:
-        _, pred = train_linear(train, test)
-        rows.append({"model": "Linear Regression", "n_features": len(FEATURES), **score(y_test, pred)})
-        log.info("Linear Regression: %s", rows[-1])
+    if exp["run_baselines"]:
+        linear, pred = train_linear(train, test)
+        record("Linear Regression", "random", FEATURES, linear, "sklearn", y_test, pred, {"model": "linear"})
+
+    if exp.get("run_weather") and weather is not None:
+        for name, extra_cols in [("Improved + real weather", WEATHER_FEATURES),
+                                 ("Improved + day of year (control)", ["pickup_dayofyear"])]:
+            feats = FEATURES + extra_cols
+            m_w = train_improved(train, cfg, feats)
+            record(name, "random", feats, m_w, "lightgbm", y_test,
+                   m_w.predict(test[feats], num_iteration=m_w.best_iteration),
+                   {**improved_params, "best_iteration": m_w.best_iteration}, test)
+
+    # ---------------- Time split ----------------
+    time_metrics = None
+    if exp.get("run_time_split"):
+        t_train, t_test = make_time_split(data, cfg)
+        t_y = t_test["trip_duration"].values
+        variants = [("Improved LightGBM (tuned)", FEATURES)]
+        if exp.get("run_weather") and weather is not None:
+            variants += [("Improved + real weather", FEATURES + WEATHER_FEATURES),
+                         ("Improved + day of year (control)", FEATURES + ["pickup_dayofyear"])]
+        for name, feats in variants:
+            m_t = train_improved(t_train, cfg, feats, validation="time")
+            metrics = record(name, "time", feats, m_t, "lightgbm", t_y,
+                             m_t.predict(t_test[feats], num_iteration=m_t.best_iteration),
+                             {**improved_params, "best_iteration": m_t.best_iteration}, t_test)
+            if feats == FEATURES:
+                time_metrics = metrics
 
     return {"model": model, "comparison": pd.DataFrame(rows), "improved_metrics": improved,
+            "june_only_metrics": june_metrics, "time_split_metrics": time_metrics,
             "test": test, "test_pred_sec": np.expm1(pred_log)}
 
 
