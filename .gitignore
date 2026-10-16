@@ -1,0 +1,33 @@
+# ---- Data (never commit: large, and covered by Kaggle's terms) ----
+data/
+*.csv
+*.parquet
+*.zip
+*.duckdb
+!tests/fixtures/*.csv
+
+# ---- Secrets ----
+.env
+kaggle.json
+
+# ---- Experiment tracking / model artifacts ----
+mlruns/
+mlartifacts/
+models/
+*.pkl
+*.joblib
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# ---- Notebooks / editors / OS ----
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store
