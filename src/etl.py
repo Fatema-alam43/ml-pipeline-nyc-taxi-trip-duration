@@ -100,8 +100,10 @@ def cleaning_rules(df: pd.DataFrame, cfg: dict) -> dict:
     }
 
 
-def clean(df: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Apply the cleaning rules in order.
+def clean_pandas(df: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Reference implementation of the cleaning rules in pandas (used to verify the SQL version).
+
+    Apply the cleaning rules in order.
 
     Returns the cleaned data and a summary with two counts per rule:
     rows flagged by the rule on its own, and rows newly removed after the earlier rules.
@@ -128,6 +130,46 @@ def clean(df: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                     "newly_removed": total_removed, "rows_remaining": len(kept)})
     summary = pd.DataFrame(records)
 
-    log.info("Cleaning removed %s of %s rows (%.2f%%), %s remain",
-             f"{total_removed:,}", f"{n_raw:,}", total_removed / n_raw * 100, f"{len(kept):,}")
     return kept.reset_index(drop=True), summary
+
+
+def clean_sql(raw: pd.DataFrame, cfg: dict, con) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Clean the raw trips with sql/01_clean.sql (DuckDB). Adds distance_km.
+
+    Returns the cleaned trips (original row order and dtypes) and the cleaning summary.
+    """
+    from src import db  # local import keeps etl usable without duckdb for the pandas path
+
+    c, box = cfg["cleaning"], cfg["cleaning"]["nyc_bbox"]
+    params = {"min_duration_s": c["min_duration_s"], "max_duration_s": c["max_duration_s"],
+              "min_distance_km": c["min_distance_km"], "min_passengers": c["min_passengers"],
+              "lat_min": box["lat_min"], "lat_max": box["lat_max"],
+              "lon_min": box["lon_min"], "lon_max": box["lon_max"]}
+
+    con.register("trips_raw", raw.assign(row_id=np.arange(len(raw))))
+    db.execute(con, "01_clean.sql", params)
+    con.unregister("trips_raw")
+
+    clean = con.sql("SELECT * EXCLUDE (row_id) FROM trips_clean ORDER BY row_id").df()
+    clean = clean.astype({**RAW_DTYPES, "distance_km": "float32"})
+    summary = (con.sql("SELECT * FROM cleaning_summary ORDER BY rule_order").df()
+               .drop(columns="rule_order").astype({"rows_flagged": int, "newly_removed": int,
+                                                   "rows_remaining": int}))
+
+    n_raw, removed = len(raw), len(raw) - len(clean)
+    log.info("SQL cleaning removed %s of %s rows (%.2f%%), %s remain",
+             f"{removed:,}", f"{n_raw:,}", removed / n_raw * 100, f"{len(clean):,}")
+    return clean, summary
+
+
+def verify_sql_matches_pandas(raw: pd.DataFrame, clean_sql_df: pd.DataFrame,
+                              summary_sql: pd.DataFrame, cfg: dict) -> None:
+    """Check the SQL and pandas cleaning give identical results. Raises AssertionError if not."""
+    clean_pd, summary_pd = clean_pandas(add_distance(raw), cfg)
+    cols = ["rows_flagged", "newly_removed", "rows_remaining"]
+    assert summary_sql[cols].equals(summary_pd[cols].astype(int)), (
+        f"Cleaning summaries differ:\nSQL:\n{summary_sql}\npandas:\n{summary_pd}")
+    assert clean_sql_df["id"].equals(clean_pd["id"]), "SQL and pandas kept different trips"
+    assert np.array_equal(clean_sql_df["distance_km"].values, clean_pd["distance_km"].values), \
+        "SQL and pandas distances differ"
+    log.info("Verified: SQL and pandas cleaning are identical (same rows, order and distances)")
