@@ -5,6 +5,7 @@ kaggle>=1.6
 numpy>=2.0          # numpy 2 rules are needed to reproduce the published row counts exactly
 pandas>=2.0
 pyarrow>=14.0       # Parquet files
+duckdb>=1.0         # SQL engine (cleaning + analytics)
 pyyaml>=6.0
 
 # Modelling

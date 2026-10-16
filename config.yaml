@@ -22,6 +22,7 @@ cleaning:                         # rows breaking any rule are removed
   max_duration_s: 21600           # longer than 6 h: forgotten meters
   min_distance_km: 1.0e-6         # at or below: pickup == dropoff (GPS error / cancelled)
   min_passengers: 1               # 0 passengers is not a valid trip
+  verify_with_pandas: true        # re-run the rules in pandas and check SQL gives identical results
   nyc_bbox:                       # pickup AND dropoff must be inside this box
     lat_min: 40.5
     lat_max: 41.0

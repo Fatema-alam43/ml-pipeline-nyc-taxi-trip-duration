@@ -1,6 +1,6 @@
 # ML Pipeline: NYC Taxi Trip Duration
 
-End-to-end machine learning pipeline that predicts New York City taxi trip duration from 1.46 million trips: data validation, ETL, feature engineering, gradient boosting, and (in progress) SQL analytics, automated testing, experiment tracking and cloud deployment.
+End-to-end machine learning pipeline that predicts New York City taxi trip duration from 1.46 million trips: data validation, SQL-based ETL with DuckDB and Parquet, feature engineering, gradient boosting, and (in progress) automated testing, experiment tracking and cloud deployment.
 
 > **Status:** work in progress.
 
@@ -33,25 +33,61 @@ One command runs every step and writes:
 | Cleaned data and model features | `data/processed/*.parquet` |
 | Trained model | `models/lgbm_improved.txt` |
 | Metrics (validation, rows removed, model scores) | `reports/metrics.json` |
-| Cleaning summary, model comparison, error by trip length, weather analysis | `reports/*.csv` |
+| Cleaning summary, model comparison, error by trip length | `reports/*.csv` |
+| SQL analytics (daily KPIs, rolling averages, slowest days, weather impact, hourly patterns) | `reports/sql/*.csv` |
 | Figures | `reports/figures/` |
 
 All thresholds and model settings are in [`config.yaml`](config.yaml).
+
+## SQL layer (DuckDB)
+
+Cleaning and analytics run as plain SQL files on [DuckDB](https://duckdb.org/), an in-process analytical database (no server needed), reading the pipeline's Parquet files directly.
+
+| File | What it does | SQL techniques |
+|---|---|---|
+| [`00_macros.sql`](sql/00_macros.sql) | Haversine distance as a reusable SQL function | `CREATE MACRO` |
+| [`01_clean.sql`](sql/01_clean.sql) | The 4 cleaning rules, valid trips, and a per-rule summary | CTEs, `CASE`-style flags, running total with a window function |
+| [`02_views.sql`](sql/02_views.sql) | Views over the Parquet features and the weather file (unit conversion, `T` = trace) | `read_parquet`, `read_csv`, `strptime`, `LEFT JOIN`, `MEDIAN` |
+| [`03_daily_kpis.sql`](sql/03_daily_kpis.sql) | Trips, median duration and speed per day | aggregation |
+| [`04_rolling_7day.sql`](sql/04_rolling_7day.sql) | 7-day rolling averages and week-over-week change | `AVG() OVER (ROWS BETWEEN 6 PRECEDING ...)`, `LAG()`, named `WINDOW` |
+| [`05_slowest_days.sql`](sql/05_slowest_days.sql) | Slowest days overall and per month | `RANK() OVER (PARTITION BY ...)`, `QUALIFY` |
+| [`06_weather_impact.sql`](sql/06_weather_impact.sql) | Speed and trip volume on snowy, rainy and dry days | `CASE`, CTE |
+| [`07_hourly_by_weekday.sql`](sql/07_hourly_by_weekday.sql) | Average duration by hour, weekdays vs weekends | `FILTER` (conditional aggregation) |
+
+**Verified against pandas:** every run re-applies the cleaning rules in pandas and checks that SQL keeps exactly the same rows, in the same order, with bit-identical distances.
+
+Query results are written to `reports/sql/`.
+
+### Storage: CSV vs Parquet
+
+```bash
+python scripts/benchmark_storage.py
+```
+Parquet files are about 3x smaller and load about 15x faster than CSV:
+
+| Dataset | CSV | Parquet | Size | pandas load (CSV → Parquet) | DuckDB query (CSV → Parquet) |
+|---|---|---|---|---|---|
+| Raw trips | 200.6 MB | 48.0 MB | 4.2x smaller | 1.48 s → 0.02 s (62.5x faster) | 0.17 s → 0.006 s (29.0x faster) |
+| Engineered features | 175.0 MB | 59.6 MB | 2.9x smaller | 1.41 s → 0.03 s (55.7x faster) | 0.229 s → 0.006 s (39.4x faster) |
+
+
 
 ## Project structure
 
 ```
 ├── config.yaml              # paths, validation and cleaning thresholds, model settings
-├── scripts/download_data.py # downloads and verifies the raw data from Kaggle
+├── scripts/
+│   ├── download_data.py     # downloads and verifies the raw data from Kaggle
+│   └── benchmark_storage.py # CSV vs Parquet: size, load time, query time
 ├── src/
 │   ├── config.py            # loads config.yaml
-│   ├── etl.py               # load, validate, clean
+│   ├── db.py                # runs the SQL files with DuckDB
+│   ├── etl.py               # load, validate, clean (SQL, verified against pandas)
 │   ├── features.py          # feature engineering (16 features, no target leakage)
 │   ├── train.py             # shared train/test split, models, evaluation
-│   ├── weather.py           # Central Park weather analysis
 │   ├── plots.py             # figures
 │   └── pipeline.py          # runs everything: python -m src.pipeline
-├── sql/                     # (in progress) DuckDB SQL analytics
+├── sql/                     # DuckDB SQL: cleaning, views and 5 analysis queries
 ├── tests/                   # (in progress) data validation and unit tests
 ├── api/                     # (in progress) prediction API
 ├── notebooks/               # exploration
