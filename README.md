@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Fatema-alam43/ml-pipeline-nyc-taxi-trip-duration/actions/workflows/ci.yml/badge.svg)](https://github.com/Fatema-alam43/ml-pipeline-nyc-taxi-trip-duration/actions/workflows/ci.yml)
 
-End-to-end machine learning pipeline that predicts New York City taxi trip duration from 1.46 million trips: data contracts, SQL-based ETL with DuckDB and Parquet, feature engineering, gradient boosting, automated tests with CI, and (in progress) experiment tracking and cloud deployment.
+End-to-end machine learning pipeline that predicts New York City taxi trip duration from 1.46 million trips: data contracts, SQL-based ETL with DuckDB and Parquet, feature engineering, gradient boosting, automated tests with CI, honest time-based evaluation, MLflow experiment tracking, SHAP explanations, and (in progress) cloud deployment.
 
 > **Status:** work in progress.
 
@@ -24,8 +24,9 @@ Files are saved to `data/raw/` and checked automatically (row counts and timesta
 ## Running the pipeline
 
 ```bash
-python -m src.pipeline                  # full run: validation, cleaning, features, all models
-python -m src.pipeline --no-baselines   # only the improved model (faster)
+python -m src.pipeline              # full run: all models, both splits, SHAP, map, model card
+python -m src.pipeline --fast       # only the main model
+python -m src.pipeline --no-mlflow  # without MLflow logging
 ```
 
 One command runs every step and writes:
@@ -37,9 +38,51 @@ One command runs every step and writes:
 | Metrics (validation, rows removed, model scores) | `reports/metrics.json` |
 | Cleaning summary, model comparison, error by trip length | `reports/*.csv` |
 | SQL analytics (daily KPIs, rolling averages, slowest days, weather impact, hourly patterns) | `reports/sql/*.csv` |
-| Figures | `reports/figures/` |
+| Figures (incl. SHAP plots and speed map) | `reports/figures/` |
+| Model card | `reports/model_card.md` |
+| MLflow run history | `mlflow.db`, `mlruns/` |
 
 All thresholds and model settings are in [`config.yaml`](config.yaml).
+
+## Results: 
+
+| Evaluation | MAE | What it shows |
+|---|---|---|
+| Random split (course version) | 171.0 s | Same days appear in training and test |
+| Random split, June trips only | 181.6 s | Same model scored only on June: June trips are harder (trips got longer every month) |
+| **Time-based split** (train Jan–May, test June) | **186.6 s** | **The realistic estimate for future trips** |
+The gap between the first and last rows has two causes, separated by the middle row: June is a harder month, and the model cannot learn June's own conditions from June.
+
+| Evaluation | No weather | + real weather | + day of year only |
+|---|---|---|---|
+| Random split | 171.0 s | 167.2 s | 165.8 s |
+| Time split | 186.6 s | 189.8 s | 195.2 s |
+
+All numbers, plus known weaknesses and limits of use, are in the **[model card](reports/model_card.md)**, which the pipeline regenerates on every run.
+
+### What drives the predictions (SHAP)
+
+![SHAP summary](reports/figures/shap_summary.png)
+
+Distance dominates: long trips (red) push the prediction up, short ones (blue) down. The pickup hour comes next. The model learned the daily traffic cycle, and weekend mornings are much faster than weekday mornings:
+
+![SHAP pickup hour](reports/figures/shap_pickup_hour.png)
+
+### Where traffic is slowest
+
+![Speed map](reports/figures/speed_map.png)
+
+Median straight-line speed of trips by pickup area (grid computed in SQL, [`08_speed_by_area.sql`](sql/08_speed_by_area.sql)). Midtown is the slowest area; trips from the airports are the fastest. Central Park shows as a gap because there are no pickups inside it. An interactive version is saved as `reports/speed_map.html`.
+
+### Experiment tracking (MLflow)
+
+Every model run is logged to MLflow with its settings, scores, feature list, git commit and model file:
+
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
+![MLflow runs](reports/figures/mlflow_runs.png)
 
 ## SQL layer (DuckDB)
 
@@ -55,6 +98,7 @@ Cleaning and analytics run as plain SQL files on [DuckDB](https://duckdb.org/), 
 | [`05_slowest_days.sql`](sql/05_slowest_days.sql) | Slowest days overall and per month | `RANK() OVER (PARTITION BY ...)`, `QUALIFY` |
 | [`06_weather_impact.sql`](sql/06_weather_impact.sql) | Speed and trip volume on snowy, rainy and dry days | `CASE`, CTE |
 | [`07_hourly_by_weekday.sql`](sql/07_hourly_by_weekday.sql) | Average duration by hour, weekdays vs weekends | `FILTER` (conditional aggregation) |
+| [`08_speed_by_area.sql`](sql/08_speed_by_area.sql) | Median speed on a grid of pickup areas (for the map) | `FLOOR` binning, `HAVING` |
 
 **Verified against pandas:** every run re-applies the cleaning rules in pandas and checks that SQL keeps exactly the same rows, in the same order, with bit-identical distances.
 
@@ -89,11 +133,14 @@ Parquet files are 3–4x smaller than CSV, load about 55–60x faster in pandas,
 │   ├── etl.py               # load, validate, clean (SQL, verified against pandas)
 │   ├── schemas.py           # data contracts (pandera) for raw, clean and feature data
 │   ├── features.py          # feature engineering (16 features, no target leakage)
-│   ├── train.py             # shared train/test split, models, evaluation
-│   ├── plots.py             # figures
+│   ├── train.py             # random and time-based splits, models, evaluation
+│   ├── tracking.py          # MLflow experiment tracking
+│   ├── explain.py           # SHAP explanations
+│   ├── model_card.py        # writes reports/model_card.md
+│   ├── plots.py             # figures, including the speed map
 │   └── pipeline.py          # runs everything: python -m src.pipeline
-├── sql/                     # DuckDB SQL: cleaning, views and 5 analysis queries
-├── tests/                   # 60 pytest tests + synthetic fixtures
+├── sql/                     # DuckDB SQL: cleaning, views and 6 analysis queries
+├── tests/                   # 66 pytest tests + synthetic fixtures
 ├── api/                     # (in progress) prediction API
 ├── notebooks/               # exploration
 └── reports/figures/         # generated figures
@@ -109,13 +156,14 @@ Parquet files are 3–4x smaller than CSV, load about 55–60x faster in pandas,
 | Clean data | Every row satisfies every cleaning rule (duration, distance, NYC area, passengers) |
 | Features | The 16 expected features with valid ranges, no rush hour on weekends, and **no leaky columns** (`speed_kmph`, `dropoff_datetime`) |
 
-**Automated tests** (60 tests, about 5 seconds, run with `pytest`):
+**Automated tests** (66 tests, about 10 seconds, run with `pytest`):
 
 - haversine distance against known distances (Empire State Building → Times Square ≈ 1.07 km)
 - each cleaning rule on hand-made trips, including values exactly on the limits (e.g. 60 s, longitude −73.7) that must be kept
 - exact cleaning counts on a synthetic sample with planted problems, and SQL vs pandas giving identical results
 - feature logic (compass bearing, rush hour, airport trips) and the leakage guard
-- every SQL analysis query, and the whole pipeline end to end
+- the time-based split (no day appears in both training and test), and SHAP values adding up exactly to each prediction
+- every SQL analysis query, and the whole pipeline end to end, including MLflow logging and the model card
 
 Tests use **synthetic data** ([`scripts/make_test_fixtures.py`](scripts/make_test_fixtures.py)), so no Kaggle data is stored in the repository and every expected count is known exactly.
 

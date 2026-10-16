@@ -1,5 +1,5 @@
 {
-  "run_at_utc": "2026-10-16T18:53:32+00:00",
+  "run_at_utc": "2026-10-16T21:06:27+00:00",
   "validation": {
     "rows": 1458644,
     "missing_values": 0,
@@ -13,55 +13,155 @@
   "rows_clean": 1442940,
   "n_features": 16,
   "improved_model": {
-    "model": "Improved LightGBM (tuned)",
-    "n_features": 16,
     "mae_s": 171.0,
     "rmse_s": 296.9,
     "rmsle": 0.3103,
     "r2": 0.799,
     "best_iteration": 1566
   },
+  "june_only": {
+    "mae_s": 181.6,
+    "rmse_s": 311.7,
+    "rmsle": 0.3136,
+    "r2": 0.809
+  },
+  "time_split": {
+    "mae_s": 186.6,
+    "rmse_s": 338.8,
+    "rmsle": 0.3211,
+    "r2": 0.779
+  },
   "comparison": [
     {
       "model": "Template LightGBM (with speed_kmph leak)",
+      "split": "random",
       "n_features": 6,
       "mae_s": 17.3,
       "rmse_s": 70.9,
       "rmsle": 0.0603,
-      "r2": 0.989
+      "r2": 0.989,
+      "june_only_mae_s": NaN,
+      "june_only_rmse_s": NaN,
+      "june_only_rmsle": NaN,
+      "june_only_r2": NaN
     },
     {
       "model": "LightGBM, no leak",
+      "split": "random",
       "n_features": 5,
       "mae_s": 223.9,
       "rmse_s": 357.9,
       "rmsle": 0.3934,
-      "r2": 0.708
+      "r2": 0.708,
+      "june_only_mae_s": NaN,
+      "june_only_rmse_s": NaN,
+      "june_only_rmsle": NaN,
+      "june_only_r2": NaN
     },
     {
       "model": "LightGBM + engineered features (template settings)",
+      "split": "random",
       "n_features": 16,
       "mae_s": 181.4,
       "rmse_s": 311.6,
       "rmsle": 0.323,
-      "r2": 0.778
+      "r2": 0.778,
+      "june_only_mae_s": NaN,
+      "june_only_rmse_s": NaN,
+      "june_only_rmsle": NaN,
+      "june_only_r2": NaN
     },
     {
       "model": "Improved LightGBM (tuned)",
+      "split": "random",
       "n_features": 16,
       "mae_s": 171.0,
       "rmse_s": 296.9,
       "rmsle": 0.3103,
-      "r2": 0.799
+      "r2": 0.799,
+      "june_only_mae_s": 181.6,
+      "june_only_rmse_s": 311.7,
+      "june_only_rmsle": 0.3136,
+      "june_only_r2": 0.809
     },
     {
       "model": "Linear Regression",
+      "split": "random",
       "n_features": 16,
       "mae_s": 262.9,
       "rmse_s": 425.7,
       "rmsle": 0.4332,
-      "r2": 0.587
+      "r2": 0.587,
+      "june_only_mae_s": NaN,
+      "june_only_rmse_s": NaN,
+      "june_only_rmsle": NaN,
+      "june_only_r2": NaN
+    },
+    {
+      "model": "Improved + real weather",
+      "split": "random",
+      "n_features": 20,
+      "mae_s": 167.2,
+      "rmse_s": 290.3,
+      "rmsle": 0.3051,
+      "r2": 0.808,
+      "june_only_mae_s": NaN,
+      "june_only_rmse_s": NaN,
+      "june_only_rmsle": NaN,
+      "june_only_r2": NaN
+    },
+    {
+      "model": "Improved + day of year (control)",
+      "split": "random",
+      "n_features": 17,
+      "mae_s": 165.8,
+      "rmse_s": 288.0,
+      "rmsle": 0.3036,
+      "r2": 0.811,
+      "june_only_mae_s": NaN,
+      "june_only_rmse_s": NaN,
+      "june_only_rmsle": NaN,
+      "june_only_r2": NaN
+    },
+    {
+      "model": "Improved LightGBM (tuned)",
+      "split": "time",
+      "n_features": 16,
+      "mae_s": 186.6,
+      "rmse_s": 338.8,
+      "rmsle": 0.3211,
+      "r2": 0.779,
+      "june_only_mae_s": NaN,
+      "june_only_rmse_s": NaN,
+      "june_only_rmsle": NaN,
+      "june_only_r2": NaN
+    },
+    {
+      "model": "Improved + real weather",
+      "split": "time",
+      "n_features": 20,
+      "mae_s": 189.8,
+      "rmse_s": 342.4,
+      "rmsle": 0.3238,
+      "r2": 0.775,
+      "june_only_mae_s": NaN,
+      "june_only_rmse_s": NaN,
+      "june_only_rmsle": NaN,
+      "june_only_r2": NaN
+    },
+    {
+      "model": "Improved + day of year (control)",
+      "split": "time",
+      "n_features": 17,
+      "mae_s": 195.2,
+      "rmse_s": 344.6,
+      "rmsle": 0.3286,
+      "r2": 0.772,
+      "june_only_mae_s": NaN,
+      "june_only_rmse_s": NaN,
+      "june_only_rmsle": NaN,
+      "june_only_r2": NaN
     }
   ],
-  "runtime_s": 19.9
+  "runtime_s": 86.8
 }

@@ -12,6 +12,7 @@ kaggle.json
 
 # ---- Experiment tracking / model artifacts ----
 mlruns/
+mlflow.db
 mlartifacts/
 models/
 *.pkl
