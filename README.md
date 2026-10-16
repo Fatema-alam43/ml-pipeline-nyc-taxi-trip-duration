@@ -1,6 +1,8 @@
 # ML Pipeline: NYC Taxi Trip Duration
 
-End-to-end machine learning pipeline that predicts New York City taxi trip duration from 1.46 million trips: data validation, SQL-based ETL with DuckDB and Parquet, feature engineering, gradient boosting, and (in progress) automated testing, experiment tracking and cloud deployment.
+[![CI](https://github.com/Fatema-alam43/ml-pipeline-nyc-taxi-trip-duration/actions/workflows/ci.yml/badge.svg)](https://github.com/Fatema-alam43/ml-pipeline-nyc-taxi-trip-duration/actions/workflows/ci.yml)
+
+End-to-end machine learning pipeline that predicts New York City taxi trip duration from 1.46 million trips: data contracts, SQL-based ETL with DuckDB and Parquet, feature engineering, gradient boosting, automated tests with CI, and (in progress) experiment tracking and cloud deployment.
 
 > **Status:** work in progress.
 
@@ -63,35 +65,66 @@ Query results are written to `reports/sql/`.
 ```bash
 python scripts/benchmark_storage.py
 ```
-Parquet files are about 3x smaller and load about 15x faster than CSV:
+
+Parquet files are 3–4x smaller than CSV, load about 55–60x faster in pandas, and query about 30–40x faster in DuckDB:
 
 | Dataset | CSV | Parquet | Size | pandas load (CSV → Parquet) | DuckDB query (CSV → Parquet) |
 |---|---|---|---|---|---|
 | Raw trips | 200.6 MB | 48.0 MB | 4.2x smaller | 1.48 s → 0.02 s (62.5x faster) | 0.17 s → 0.006 s (29.0x faster) |
 | Engineered features | 175.0 MB | 59.6 MB | 2.9x smaller | 1.41 s → 0.03 s (55.7x faster) | 0.229 s → 0.006 s (39.4x faster) |
 
-
-
 ## Project structure
 
 ```
 ├── config.yaml              # paths, validation and cleaning thresholds, model settings
+├── pyproject.toml           # pytest and ruff settings
+├── .github/workflows/ci.yml # lint + tests on every push
 ├── scripts/
 │   ├── download_data.py     # downloads and verifies the raw data from Kaggle
-│   └── benchmark_storage.py # CSV vs Parquet: size, load time, query time
+│   ├── benchmark_storage.py # CSV vs Parquet: size, load time, query time
+│   └── make_test_fixtures.py# generates the synthetic test data
 ├── src/
 │   ├── config.py            # loads config.yaml
 │   ├── db.py                # runs the SQL files with DuckDB
 │   ├── etl.py               # load, validate, clean (SQL, verified against pandas)
+│   ├── schemas.py           # data contracts (pandera) for raw, clean and feature data
 │   ├── features.py          # feature engineering (16 features, no target leakage)
 │   ├── train.py             # shared train/test split, models, evaluation
 │   ├── plots.py             # figures
 │   └── pipeline.py          # runs everything: python -m src.pipeline
 ├── sql/                     # DuckDB SQL: cleaning, views and 5 analysis queries
-├── tests/                   # (in progress) data validation and unit tests
+├── tests/                   # 60 pytest tests + synthetic fixtures
 ├── api/                     # (in progress) prediction API
 ├── notebooks/               # exploration
 └── reports/figures/         # generated figures
+```
+
+## Data quality and testing
+
+**Data contracts** ([`src/schemas.py`](src/schemas.py), using [pandera](https://pandera.readthedocs.io/)) are checked at every stage of the pipeline:
+
+| Stage | Contract |
+|---|---|
+| Raw file | Exact columns and types, unique ids, valid vendor and flag values, plausible coordinates, positive durations. Also rejects a file with exactly 1,048,575 rows (Excel's row limit) and timestamps whose dropoff − pickup ≠ trip duration (seconds lost in Excel) |
+| Clean data | Every row satisfies every cleaning rule (duration, distance, NYC area, passengers) |
+| Features | The 16 expected features with valid ranges, no rush hour on weekends, and **no leaky columns** (`speed_kmph`, `dropoff_datetime`) |
+
+**Automated tests** (60 tests, about 5 seconds, run with `pytest`):
+
+- haversine distance against known distances (Empire State Building → Times Square ≈ 1.07 km)
+- each cleaning rule on hand-made trips, including values exactly on the limits (e.g. 60 s, longitude −73.7) that must be kept
+- exact cleaning counts on a synthetic sample with planted problems, and SQL vs pandas giving identical results
+- feature logic (compass bearing, rush hour, airport trips) and the leakage guard
+- every SQL analysis query, and the whole pipeline end to end
+
+Tests use **synthetic data** ([`scripts/make_test_fixtures.py`](scripts/make_test_fixtures.py)), so no Kaggle data is stored in the repository and every expected count is known exactly.
+
+**Continuous integration:** [GitHub Actions](.github/workflows/ci.yml) runs the linter ([ruff](https://docs.astral.sh/ruff/)) and all tests on every push, using the exact package versions in `requirements-lock.txt`. Changing a single cleaning rule from `<` to `<=` makes 5 tests fail.
+
+```bash
+pip install -r requirements-dev.txt
+ruff check .
+pytest
 ```
 
 ## Data sources
