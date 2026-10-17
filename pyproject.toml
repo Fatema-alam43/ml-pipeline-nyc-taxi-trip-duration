@@ -1,13 +1,13 @@
 [project]
 name = "ml-pipeline-nyc-taxi-trip-duration"
-version = "0.4.0"
+version = "0.5.0"
 requires-python = ">=3.10"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
-filterwarnings = ["ignore::DeprecationWarning"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore:Using `httpx` with `starlette.testclient`"]
 
 [tool.ruff]
 line-length = 120

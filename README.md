@@ -2,9 +2,8 @@
 
 [![CI](https://github.com/Fatema-alam43/ml-pipeline-nyc-taxi-trip-duration/actions/workflows/ci.yml/badge.svg)](https://github.com/Fatema-alam43/ml-pipeline-nyc-taxi-trip-duration/actions/workflows/ci.yml)
 
-End-to-end machine learning pipeline that predicts New York City taxi trip duration from 1.46 million trips: data contracts, SQL-based ETL with DuckDB and Parquet, feature engineering, gradient boosting, automated tests with CI, honest time-based evaluation, MLflow experiment tracking, SHAP explanations, and (in progress) cloud deployment.
+End-to-end machine learning pipeline that predicts New York City taxi trip duration from 1.46 million trips: data contracts, SQL-based ETL with DuckDB and Parquet, feature engineering, gradient boosting, automated tests with CI, honest time-based evaluation, MLflow experiment tracking, SHAP explanations, and a **prediction API on AWS Lambda** (FastAPI, Docker).
 
-> **Status:** work in progress.
 
 ## Getting the data
 
@@ -44,14 +43,76 @@ One command runs every step and writes:
 
 All thresholds and model settings are in [`config.yaml`](config.yaml).
 
-## Results: 
+## Architecture
+
+```mermaid
+flowchart LR
+    K[Kaggle: 1.46M trips<br/>+ NWS weather] --> V[Validation<br/>pandera contracts]
+    V --> C[Cleaning<br/>DuckDB SQL]
+    C --> F[Features<br/>Parquet]
+    F --> T[LightGBM training<br/>MLflow tracking]
+    T --> M[(Model file<br/>Amazon S3)]
+    M --> L[FastAPI in Docker<br/>AWS Lambda]
+    U([Client]) -- POST /predict --> L
+    CI[GitHub Actions] -. lint, tests,<br/>Docker smoke test .-> L
+```
+
+## Prediction API
+
+**Live demo:** TODO-API-URL (`/docs` for interactive documentation)
+
+![API demo](reports/figures/api_demo.gif)
+
+```bash
+curl -X POST https://<api-url>/predict -H "Content-Type: application/json" -d '{
+  "pickup_latitude": 40.7580, "pickup_longitude": -73.9855,
+  "dropoff_latitude": 40.6413, "dropoff_longitude": -73.7781,
+  "pickup_datetime": "2016-06-15T17:30:00", "passenger_count": 1
+}'
+```
+<!-- TODO-API-RESPONSE: replace with the real response from your deployed API -->
+```json
+{"predicted_duration_minutes": ..., "predicted_duration_seconds": ..., "straight_line_distance_km": 21.77,
+ "model_version": "...", "warnings": []}
+```
+
+| Endpoint | What it does |
+|---|---|
+| `POST /predict` | Predicted duration for a trip (pickup/dropoff coordinates, pickup time, passengers) |
+| `GET /health` | Service status and model version (git commit and SHA-256 of the model file) |
+| `GET /docs` | Interactive documentation |
+
+- **No training/serving skew:** the API computes features with the same `src/features.py` code as training, and a
+  test checks that both produce identical features (values and types) for the same trips.
+- **Input validation** (Pydantic): coordinates outside New York City, passenger counts outside 1–6, identical
+  pickup and dropoff, unknown fields (e.g. `trip_duration`) are rejected with a clear message per field.
+  Pickups outside the training months return a warning with the prediction.
+- **Deployment:** the model file is stored in S3 and loaded at startup; the image runs on AWS Lambda through the
+  [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), so the same image also runs locally.
+  See [docs/deploy_aws.md](docs/deploy_aws.md).
+
+```bash
+# Run locally
+uvicorn api.main:app --port 8080                 # then open http://localhost:8080/docs
+
+# Or with Docker
+docker build --build-arg PYTHON_VERSION=$(cat .python-version) -t nyc-taxi-api .
+docker run -p 8080:8080 -v "$(pwd)/models:/models:ro" -e MODEL_PATH=/models/lgbm_improved.txt nyc-taxi-api
+```
+
+## Results: an honest evaluation
+
+The course version evaluated the model on a **random** split, so trips from the same days appeared in both training and test. In real use a model always predicts trips from days it has never seen, so the pipeline also evaluates a **time-based split**: train on January–May, test on June.
 
 | Evaluation | MAE | What it shows |
 |---|---|---|
 | Random split (course version) | 171.0 s | Same days appear in training and test |
 | Random split, June trips only | 181.6 s | Same model scored only on June: June trips are harder (trips got longer every month) |
 | **Time-based split** (train Jan–May, test June) | **186.6 s** | **The realistic estimate for future trips** |
+
 The gap between the first and last rows has two causes, separated by the middle row: June is a harder month, and the model cannot learn June's own conditions from June.
+
+**Weather, tested honestly.** Adding daily weather looks helpful on the random split, but a *day-of-year* control (no weather at all) does just as well, because weather values also tell the model which day it is. On the time split, where days are new, neither helps:
 
 | Evaluation | No weather | + real weather | + day of year only |
 |---|---|---|---|
@@ -126,7 +187,9 @@ Parquet files are 3–4x smaller than CSV, load about 55–60x faster in pandas,
 ├── scripts/
 │   ├── download_data.py     # downloads and verifies the raw data from Kaggle
 │   ├── benchmark_storage.py # CSV vs Parquet: size, load time, query time
-│   └── make_test_fixtures.py# generates the synthetic test data
+│   ├── make_test_fixtures.py# generates the synthetic test data
+│   ├── make_demo_model.py   # small model on synthetic data (tests and CI)
+│   └── pin_api_requirements.py # pins the API image to the training package versions
 ├── src/
 │   ├── config.py            # loads config.yaml
 │   ├── db.py                # runs the SQL files with DuckDB
@@ -141,7 +204,11 @@ Parquet files are 3–4x smaller than CSV, load about 55–60x faster in pandas,
 │   └── pipeline.py          # runs everything: python -m src.pipeline
 ├── sql/                     # DuckDB SQL: cleaning, views and 6 analysis queries
 ├── tests/                   # 66 pytest tests + synthetic fixtures
-├── api/                     # (in progress) prediction API
+├── api/                     # FastAPI prediction service (main.py, schemas.py, model.py)
+├── Dockerfile               # API image (runs locally, on ECS and on AWS Lambda)
+├── deploy/                  # AWS Lambda deploy and teardown scripts
+├── docs/deploy_aws.md       # deployment guide
+├── examples/                # sample API request
 ├── notebooks/               # exploration
 └── reports/figures/         # generated figures
 ```
@@ -156,7 +223,7 @@ Parquet files are 3–4x smaller than CSV, load about 55–60x faster in pandas,
 | Clean data | Every row satisfies every cleaning rule (duration, distance, NYC area, passengers) |
 | Features | The 16 expected features with valid ranges, no rush hour on weekends, and **no leaky columns** (`speed_kmph`, `dropoff_datetime`) |
 
-**Automated tests** (66 tests, about 10 seconds, run with `pytest`):
+**Automated tests** (84 tests, about 10 seconds, run with `pytest`):
 
 - haversine distance against known distances (Empire State Building → Times Square ≈ 1.07 km)
 - each cleaning rule on hand-made trips, including values exactly on the limits (e.g. 60 s, longitude −73.7) that must be kept
@@ -164,10 +231,12 @@ Parquet files are 3–4x smaller than CSV, load about 55–60x faster in pandas,
 - feature logic (compass bearing, rush hour, airport trips) and the leakage guard
 - the time-based split (no day appears in both training and test), and SHAP values adding up exactly to each prediction
 - every SQL analysis query, and the whole pipeline end to end, including MLflow logging and the model card
+- the API: predictions, every validation rule, timezone handling, loading the model from S3, and
+  training/serving parity
 
 Tests use **synthetic data** ([`scripts/make_test_fixtures.py`](scripts/make_test_fixtures.py)), so no Kaggle data is stored in the repository and every expected count is known exactly.
 
-**Continuous integration:** [GitHub Actions](.github/workflows/ci.yml) runs the linter ([ruff](https://docs.astral.sh/ruff/)) and all tests on every push, using the exact package versions in `requirements-lock.txt`. Changing a single cleaning rule from `<` to `<=` makes 5 tests fail.
+**Continuous integration:** [GitHub Actions](.github/workflows/ci.yml) runs the linter ([ruff](https://docs.astral.sh/ruff/)) and all tests on every push, using the exact package versions in `requirements-lock.txt`, then builds the Docker image, starts it, and checks that it returns a prediction. Changing a single cleaning rule from `<` to `<=` makes 5 tests fail.
 
 ```bash
 pip install -r requirements-dev.txt
