@@ -9,10 +9,11 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from api.model import ModelService, request_to_frame, warnings_for
 from api.schemas import CFG, HealthResponse, PredictionResponse, TripRequest
@@ -20,6 +21,7 @@ from src import features
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(name)s | %(message)s")
 log = logging.getLogger("api")
+DEMO_PAGE = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
 
 
 @asynccontextmanager
@@ -64,9 +66,10 @@ async def clear_validation_errors(request: Request, exc: RequestValidationError)
     return JSONResponse(status_code=422, content={"error": "Invalid trip request", "details": errors})
 
 
-@app.get("/", include_in_schema=False)
-def root():
-    return {"service": app.title, "docs": "/docs", "health": "/health", "predict": "POST /predict"}
+@app.get("/", include_in_schema=False, response_class=HTMLResponse)
+def demo_page():
+    """Interactive demo: click two points on a map of NYC and get a predicted trip time."""
+    return DEMO_PAGE
 
 
 @app.get("/health", response_model=HealthResponse)

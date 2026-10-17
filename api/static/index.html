@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NYC Taxi Trip Duration · Live ML demo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --ok:#16a34a; --bad:#dc2626; --warn:#b45309; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color:var(--ink); background:#f8fafc; }
+  header { padding:14px 22px; background:#0f172a; color:white; display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+  header h1 { font-size:20px; margin:0; }
+  header span { color:#94a3b8; font-size:13px; }
+  header a { color:#93c5fd; font-size:13px; margin-left:auto; text-decoration:none; }
+  main { display:grid; grid-template-columns: 370px 1fr; height: calc(100vh - 52px); }
+  aside { padding:18px; overflow-y:auto; background:white; border-right:1px solid var(--line); }
+  #map { height:100%; }
+  .step { font-size:13px; color:var(--muted); margin:0 0 12px; }
+  .points div { display:flex; align-items:center; gap:8px; font-size:14px; margin:4px 0; }
+  .dot { width:12px; height:12px; border-radius:50%; display:inline-block; }
+  label { display:block; font-size:12px; font-weight:600; color:var(--muted); margin:14px 0 4px; text-transform:uppercase; letter-spacing:.03em; }
+  input, select { width:100%; padding:8px; border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  .row { display:grid; grid-template-columns: 1fr 90px; gap:10px; }
+  .presets { display:flex; flex-wrap:wrap; gap:6px; }
+  .presets button { border:1px solid var(--line); background:#f1f5f9; border-radius:999px; padding:5px 10px; font-size:12px; cursor:pointer; }
+  .presets button:hover { background:#e2e8f0; }
+  #predict { width:100%; margin-top:16px; padding:11px; border:0; border-radius:10px; background:var(--accent); color:white; font-size:15px; font-weight:600; cursor:pointer; }
+  #predict:disabled { background:#93c5fd; cursor:default; }
+  .card { margin-top:16px; padding:14px; border:1px solid var(--line); border-radius:12px; }
+  .big { font-size:40px; font-weight:700; line-height:1; }
+  .big small { font-size:16px; color:var(--muted); font-weight:500; }
+  .meta { font-size:12px; color:var(--muted); margin-top:6px; }
+  .warn { margin-top:10px; font-size:12px; color:var(--warn); background:#fffbeb; padding:8px; border-radius:8px; }
+  .error { border-color:#fecaca; background:#fef2f2; color:var(--bad); font-size:13px; }
+  .error ul { margin:6px 0 0; padding-left:18px; }
+  .bars h3 { font-size:13px; margin:0 0 8px; }
+  .bar { display:grid; grid-template-columns: 62px 1fr 56px; align-items:center; gap:8px; font-size:12px; margin:5px 0; }
+  .bar .track { background:#eef2ff; border-radius:6px; height:14px; overflow:hidden; }
+  .bar .fill { background:var(--accent); height:100%; border-radius:6px; transition: width .5s; }
+  .bar.current .fill { background:#f59e0b; }
+  footer { font-size:11px; color:var(--muted); margin-top:16px; line-height:1.5; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; grid-template-rows: auto 60vh; height:auto; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>🚕 NYC Taxi Trip Duration</h1>
+  <span>LightGBM trained on 1.4M trips · FastAPI on AWS Lambda</span>
+  <a href="/docs">API docs</a>
+  <a href="https://github.com/Fatema-alam43/ml-pipeline-nyc-taxi-trip-duration" style="margin-left:14px">GitHub</a>
+</header>
+<main>
+  <aside>
+    <p class="step">Click the map to set the <b>pickup</b>, then the <b>dropoff</b>. Drag the markers to adjust.</p>
+    <div class="points">
+      <div><span class="dot" style="background:#16a34a"></span><span id="pickupText">Pickup: click the map</span></div>
+      <div><span class="dot" style="background:#dc2626"></span><span id="dropoffText">Dropoff: click the map</span></div>
+    </div>
+
+    <label>Try a trip</label>
+    <div class="presets">
+      <button data-p="40.7580,-73.9855,40.6413,-73.7781">Times Square → JFK</button>
+      <button data-p="40.7527,-73.9772,40.7769,-73.8740">Grand Central → LaGuardia</button>
+      <button data-p="40.7069,-74.0113,40.6782,-73.9442">Wall Street → Brooklyn</button>
+      <button data-p="40.7812,-73.9665,40.7128,-74.0060">Central Park → City Hall</button>
+    </div>
+
+    <div class="row">
+      <div><label for="when">Pickup time (NYC)</label><input id="when" type="datetime-local" value="2016-06-15T17:30"></div>
+      <div><label for="pax">Passengers</label>
+        <select id="pax"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></div>
+    </div>
+
+    <button id="predict" disabled>Predict trip duration</button>
+    <div id="result"></div>
+    <div id="compare"></div>
+
+    <footer>
+      Trained on Jan–Jun 2016 Kaggle trips. Typical error: about 3 minutes on trips under 20 minutes;
+      long trips are underestimated. Distances are straight-line. See the model card on GitHub.
+    </footer>
+  </aside>
+  <div id="map"></div>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const NYC = [[40.5, -74.3], [41.0, -73.7]];          // the area the model accepts (same as the API)
+  const map = L.map("map", { maxBounds: [[40.3, -74.6], [41.2, -73.4]], minZoom: 10 }).fitBounds([[40.62, -74.05], [40.85, -73.75]]);
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+              { attribution: "Tiles &copy; Esri", maxZoom: 16 }).addTo(map);
+  L.rectangle(NYC, { color: "#2563eb", weight: 1, dashArray: "4 4", fill: false, interactive: false }).addTo(map);
+
+  const icon = (color) => L.divIcon({ className: "", iconSize: [18, 18], iconAnchor: [9, 9],
+    html: `<div style="width:18px;height:18px;border-radius:50%;background:${color};border:3px solid white;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>` });
+  let pickup = null, dropoff = null, line = null;
+  const $ = (id) => document.getElementById(id);
+  const fmt = (ll) => `${ll.lat.toFixed(4)}, ${ll.lng.toFixed(4)}`;
+
+  function marker(latlng, color) {
+    const m = L.marker(latlng, { icon: icon(color), draggable: true }).addTo(map);
+    m.on("dragend", () => { update(); predict(); });
+    return m;
+  }
+  function update() {
+    $("pickupText").textContent = pickup ? `Pickup: ${fmt(pickup.getLatLng())}` : "Pickup: click the map";
+    $("dropoffText").textContent = dropoff ? `Dropoff: ${fmt(dropoff.getLatLng())}` : "Dropoff: click the map";
+    if (line) map.removeLayer(line);
+    line = (pickup && dropoff) ? L.polyline([pickup.getLatLng(), dropoff.getLatLng()],
+      { color: "#0f172a", weight: 3, dashArray: "6 6" }).addTo(map) : null;
+    $("predict").disabled = !(pickup && dropoff);
+  }
+  function setTrip(p) {
+    const [a, b, c, d] = p.split(",").map(Number);
+    [pickup, dropoff].forEach((m) => m && map.removeLayer(m));
+    pickup = marker([a, b], "#16a34a"); dropoff = marker([c, d], "#dc2626");
+    map.fitBounds(L.latLngBounds([[a, b], [c, d]]).pad(0.3));
+    update(); predict();
+  }
+  map.on("click", (e) => {
+    if (!pickup) pickup = marker(e.latlng, "#16a34a");
+    else if (!dropoff) dropoff = marker(e.latlng, "#dc2626");
+    else { map.removeLayer(pickup); map.removeLayer(dropoff); pickup = marker(e.latlng, "#16a34a"); dropoff = null; }
+    update(); if (pickup && dropoff) predict();
+  });
+  document.querySelectorAll(".presets button").forEach((b) => b.addEventListener("click", () => setTrip(b.dataset.p)));
+  $("predict").addEventListener("click", predict);
+  $("when").addEventListener("change", () => pickup && dropoff && predict());
+  $("pax").addEventListener("change", () => pickup && dropoff && predict());
+
+  function body(datetime) {
+    const p = pickup.getLatLng(), d = dropoff.getLatLng();
+    return JSON.stringify({ pickup_latitude: p.lat, pickup_longitude: p.lng, dropoff_latitude: d.lat,
+      dropoff_longitude: d.lng, pickup_datetime: datetime, passenger_count: Number($("pax").value) });
+  }
+  async function call(datetime) {
+    const r = await fetch("predict", { method: "POST", headers: { "Content-Type": "application/json" }, body: body(datetime) });
+    return { ok: r.ok, data: await r.json() };
+  }
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  async function predict() {
+    if (!(pickup && dropoff)) return;
+    const when = $("when").value;
+    $("predict").disabled = true; $("predict").textContent = "Predicting…";
+    $("compare").innerHTML = "";
+    try {
+      const { ok, data } = await call(when);
+      if (!ok) {
+        const items = (data.details || []).map((e) => `<li><b>${esc(e.field)}</b>: ${esc(e.message)}</li>`).join("");
+        $("result").innerHTML = `<div class="card error"><b>${esc(data.error || "Request failed")}</b><ul>${items}</ul></div>`;
+        return;
+      }
+      $("result").innerHTML = `<div class="card">
+          <div class="big">${data.predicted_duration_minutes} <small>min</small></div>
+          <div class="meta">${data.straight_line_distance_km} km straight-line · model ${esc(data.model_version)}</div>
+          ${data.warnings.map((w) => `<div class="warn">⚠ ${esc(w)}</div>`).join("")}
+        </div>`;
+      await compareTimes(when);
+    } catch (err) {
+      $("result").innerHTML = `<div class="card error">Could not reach the API: ${esc(err.message)}</div>`;
+    } finally {
+      $("predict").disabled = false; $("predict").textContent = "Predict trip duration";
+    }
+  }
+
+  // Same trip at different times of day: shows the traffic pattern the model learned
+  async function compareTimes(when) {
+    const day = when.slice(0, 10), hours = [["03:00", "3 am"], ["08:00", "8 am"], ["13:00", "1 pm"], ["17:30", "5:30 pm"], ["22:00", "10 pm"]];
+    const results = [];
+    for (const [h, label] of hours) {                        // one at a time: gentle on the API
+      const { ok, data } = await call(`${day}T${h}`);
+      if (ok) results.push({ label, h, min: data.predicted_duration_minutes });
+    }
+    if (!results.length) return;
+    const max = Math.max(...results.map((r) => r.min));
+    const current = when.slice(11, 16);
+    $("compare").innerHTML = `<div class="card bars"><h3>Same trip at other times on ${day}</h3>` +
+      results.map((r) => `<div class="bar ${r.h === current ? "current" : ""}"><span>${r.label}</span>
+        <div class="track"><div class="fill" style="width:${(100 * r.min / max).toFixed(0)}%"></div></div>
+        <b>${r.min} min</b></div>`).join("") + `</div>`;
+  }
+</script>
+</body>
+</html>

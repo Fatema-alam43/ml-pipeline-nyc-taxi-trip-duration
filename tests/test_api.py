@@ -75,6 +75,13 @@ def test_timezone_is_converted_to_new_york_time(client):
     assert utc["predicted_duration_seconds"] == local["predicted_duration_seconds"]
 
 
+def test_demo_page_served(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    assert "NYC Taxi Trip Duration" in r.text and 'fetch("predict"' in r.text
+
+
 # ---------- validation ----------
 
 @pytest.mark.parametrize("field, value", [
