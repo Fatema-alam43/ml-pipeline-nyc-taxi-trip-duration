@@ -1,13 +1,18 @@
 [project]
 name = "ml-pipeline-nyc-taxi-trip-duration"
-version = "0.5.0"
+version = "0.6.0"
 requires-python = ">=3.10"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q"
-filterwarnings = ["ignore::DeprecationWarning", "ignore:Using `httpx` with `starlette.testclient`"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore:Using `httpx` with `starlette.testclient`",
+    # PySpark 4.2 has not certified pandas 3 yet; the Spark/pandas parity tests check results bit-for-bit
+    "ignore:PySpark does not yet fully support pandas:FutureWarning",
+]
 
 [tool.ruff]
 line-length = 120

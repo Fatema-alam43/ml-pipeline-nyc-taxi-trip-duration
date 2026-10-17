@@ -1,0 +1,16 @@
+{
+  "improved_model": {
+    "mae_s": 171.0,
+    "rmse_s": 296.9,
+    "rmsle": 0.3103,
+    "r2": 0.799,
+    "best_iteration": 1566
+  },
+  "june_only": {
+    "mae_s": 181.6,
+    "rmse_s": 311.7,
+    "rmsle": 0.3136,
+    "r2": 0.809
+  },
+  "time_split": null
+}

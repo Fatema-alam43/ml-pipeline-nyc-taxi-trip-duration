@@ -1,6 +1,6 @@
 # Model card: NYC taxi trip duration
 
-*Generated automatically by `python -m src.pipeline` on 2026-10-16.*
+*Generated automatically by `python -m src.pipeline` on 2026-10-17.*
 
 ## Model details
 
@@ -34,7 +34,6 @@ and any period or city other than New York City, January–June 2016.
 |---|---|---|---|---|
 | Random split (all months) | 171.0 | 296.9 | 0.799 | Same days appear in training and test, as in the course version |
 | Random split, June trips only | 181.6 | 311.7 | 0.809 | Same model, scored only on June: shows how hard June is |
-| **Time-based split** (train Jan–May, test June) | **186.6** | 338.8 | 0.779 | **Realistic estimate for future trips**: June days never seen in training |
 
 The time-based split is the honest estimate: in real use the model always predicts trips from days it has
 never seen. Its error is higher for two reasons: **June trips are harder** (trips got longer every month of
@@ -44,16 +43,7 @@ Comparison of all models (test set of the random split unless noted):
 
 | model | split | mae_s | rmse_s | rmsle | r2 |
 |---|---|---|---|---|---|
-| Template LightGBM (with speed_kmph leak) | random | 17.3 | 70.9 | 0.0603 | 0.989 |
-| LightGBM, no leak | random | 223.9 | 357.9 | 0.3934 | 0.708 |
-| LightGBM + engineered features (template settings) | random | 181.4 | 311.6 | 0.323 | 0.778 |
 | Improved LightGBM (tuned) | random | 171.0 | 296.9 | 0.3103 | 0.799 |
-| Linear Regression | random | 262.9 | 425.7 | 0.4332 | 0.587 |
-| Improved + real weather | random | 167.2 | 290.3 | 0.3051 | 0.808 |
-| Improved + day of year (control) | random | 165.8 | 288.0 | 0.3036 | 0.811 |
-| Improved LightGBM (tuned) | time | 186.6 | 338.8 | 0.3211 | 0.779 |
-| Improved + real weather | time | 189.8 | 342.4 | 0.3238 | 0.775 |
-| Improved + day of year (control) | time | 195.2 | 344.6 | 0.3286 | 0.772 |
 
 ## Known weaknesses
 
@@ -84,16 +74,8 @@ The slowest days in the data:
 |---|---|---|---|
 | 1 | 2016-01-26 | 10.55 | 43.18 |
 | 2 | 2016-01-25 | 10.82 | 48.26 |
-| 3 | 2016-01-27 | 10.91 | 22.86 |
+| 3 | 2016-06-08 | 10.91 | 0.0 |
 
-Daily weather was tested as extra features, alongside a *day-of-year* control (weather is identical for all trips on a day, so it also tells the model *which* day it is):
-
-| Evaluation | No weather | + real weather | + day of year only |
-|---|---|---|---|
-| Random split | 171.0 | 167.2 | 165.8 |
-| Time split | 186.6 | 189.8 | 195.2 |
-
-Weather is therefore **not** used by the model. On the time split, which tests days the model has never seen, weather made predictions worse (186.6 → 189.8 s). Its apparent gain on the random split comes from the model recognising individual days, which the day-of-year control reproduces without any weather.
 
 ## Reproducing
 

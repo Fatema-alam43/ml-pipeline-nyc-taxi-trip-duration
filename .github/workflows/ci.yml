@@ -19,6 +19,12 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-lock.txt
 
+      - name: Set up Java (needed by PySpark)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - name: Install exact dependency versions
         run: |
           python -m pip install --upgrade pip
@@ -29,6 +35,8 @@ jobs:
         run: ruff check .
 
       - name: Tests (pytest)
+        env:
+          REQUIRE_SPARK: "1"        # Spark tests must run in CI, never be skipped
         run: pytest -v
 
   docker:

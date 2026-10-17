@@ -144,6 +144,47 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db
 
 ![MLflow runs](reports/figures/mlflow_runs.png)
 
+## Data engineering: Spark and orchestration
+
+### PySpark version of the ETL
+
+[`src/spark_etl.py`](src/spark_etl.py) re-implements the cleaning rules and all 16 features in **PySpark**, for data too large for one machine. It is checked against the pandas/DuckDB pipeline on every run with `--spark-check`:
+
+- **identical row counts for every cleaning rule** (15,704 removed), the same 1,442,940 trips, and **bit-identical values for 15 of the 16 features**; the compass bearing, which uses `atan2`, is compared within 0.001° because Java and NumPy trigonometry can differ in the last bit on some processors (2 of 1,442,940 rows on Apple Silicon)
+- verified on the full dataset, on 300,000 trips with 6,000 planted problems, and in CI on the synthetic sample
+
+Two details had to match exactly. Coordinates are stored as 32-bit floats, so the NYC limits are compared as 32-bit floats too (with a 64-bit limit, longitude −73.7 would fall *just* outside the box and change the row count). And Spark numbers weekdays from Sunday = 1 while pandas uses Monday = 0, so the day of week is converted.
+
+On a single laptop Spark is *slower* than pandas + DuckDB: Spark pays off when the data is spread over a cluster, not at 1.5 million rows. The same code runs unchanged on a cluster or on Databricks.
+
+```bash
+python -m src.spark_etl                  # Spark cleaning + features on the full data, compared with pandas
+python -m src.pipeline --spark-check     # the full pipeline, with the Spark cross-check as one step
+```
+
+### Orchestration (Prefect)
+
+The pipeline runs as a scheduled **Prefect** flow ([`flows/pipeline_flow.py`](flows/pipeline_flow.py)): every Monday at 06:00 (Toronto time) it downloads the data, validates it, cleans it, builds features, retrains and evaluates the models, and rewrites the reports.
+
+```mermaid
+flowchart LR
+    D[download<br/>retries: 2] --> V[validate<br/>data contracts] --> C[clean<br/>DuckDB SQL] --> F[features<br/>Parquet]
+    F --> S[spark-crosscheck<br/>optional]
+    F --> T[train<br/>MLflow, SHAP] --> A[analytics<br/>SQL, map] --> R[report<br/>model card]
+```
+
+- Each task reads its inputs from disk and writes its outputs to disk ([`src/steps.py`](src/steps.py)), so a failed run can be resumed from the failed task, and the same steps could run as Airflow tasks unchanged.
+- The download task retries automatically; the validate task stops the run before bad data reaches the model.
+- Each run publishes a model comparison table to the Prefect dashboard.
+
+![Prefect flow run](reports/figures/prefect_flow.png)
+
+```bash
+prefect server start                      # terminal 1: dashboard at http://127.0.0.1:4200
+python -m flows.pipeline_flow --serve     # terminal 2: registers the weekly schedule and waits for runs
+python -m flows.pipeline_flow             # or: run the flow once now
+```
+
 ## SQL layer (DuckDB)
 
 Cleaning and analytics run as plain SQL files on [DuckDB](https://duckdb.org/), an in-process analytical database (no server needed), reading the pipeline's Parquet files directly.
@@ -222,7 +263,7 @@ Parquet files are 3–4x smaller than CSV, load about 55–60x faster in pandas,
 | Clean data | Every row satisfies every cleaning rule (duration, distance, NYC area, passengers) |
 | Features | The 16 expected features with valid ranges, no rush hour on weekends, and **no leaky columns** (`speed_kmph`, `dropoff_datetime`) |
 
-**Automated tests** (84 tests, about 10 seconds, run with `pytest`):
+**Automated tests** (91 tests, about a minute, run with `pytest`):
 
 - haversine distance against known distances (Empire State Building → Times Square ≈ 1.07 km)
 - each cleaning rule on hand-made trips, including values exactly on the limits (e.g. 60 s, longitude −73.7) that must be kept
@@ -232,6 +273,7 @@ Parquet files are 3–4x smaller than CSV, load about 55–60x faster in pandas,
 - every SQL analysis query, and the whole pipeline end to end, including MLflow logging and the model card
 - the API: predictions, every validation rule, timezone handling, loading the model from S3, and
   training/serving parity
+- the PySpark ETL (bit-identical to pandas) and a full run of the Prefect flow
 
 Tests use **synthetic data** ([`scripts/make_test_fixtures.py`](scripts/make_test_fixtures.py)), so no Kaggle data is stored in the repository and every expected count is known exactly.
 
