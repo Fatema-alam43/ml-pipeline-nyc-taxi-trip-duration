@@ -1,4 +1,4 @@
-# Continuous integration: lint and test on every push and pull request.
+# Continuous integration: lint and test on every push, then build the API image and check it serves predictions.
 name: CI
 
 on:
@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python (version from .python-version)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version-file: ".python-version"
           cache: pip
@@ -30,3 +30,39 @@ jobs:
 
       - name: Tests (pytest)
         run: pytest -v
+
+  docker:
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v5
+
+      - name: Set up Python (version from .python-version)
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+          cache: pip
+          cache-dependency-path: requirements-lock.txt
+
+      - name: Train a small demo model on the synthetic test data
+        run: |
+          pip install -r requirements-lock.txt
+          python scripts/make_demo_model.py models/demo_model.txt
+
+      - name: Build the API image
+        run: docker build --build-arg PYTHON_VERSION="$(cat .python-version)" -t nyc-taxi-api .
+
+      - name: Run the container and send a prediction request
+        run: |
+          docker run -d --name api -p 8080:8080 \
+            -v "$PWD/models:/models:ro" -e MODEL_PATH=/models/demo_model.txt -e MODEL_VERSION=ci \
+            nyc-taxi-api
+          for i in $(seq 1 30); do curl -sf localhost:8080/health && break; sleep 1; done
+          curl -sf -X POST localhost:8080/predict -H "Content-Type: application/json" \
+            -d @examples/predict_request.json | tee response.json
+          python -c "import json; r = json.load(open('response.json')); assert r['predicted_duration_minutes'] > 0; print('OK:', r)"
+
+      - name: Show container logs if something failed
+        if: failure()
+        run: docker logs api
