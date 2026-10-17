@@ -64,11 +64,19 @@ def encode_categoricals(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def compute_features(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """All engineered columns for trips that already have distance_km.
+
+    Used by BOTH training (build_features) and the prediction API, so the two can never drift apart.
+    """
+    df = add_time_features(df, cfg)
+    df = add_geo_features(df, cfg)
+    return encode_categoricals(df)
+
+
 def build_features(clean_df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """Return id, pickup time, the model features and the target."""
-    df = add_time_features(clean_df, cfg)
-    df = add_geo_features(df, cfg)
-    df = encode_categoricals(df)
+    df = compute_features(clean_df, cfg)
     out = df[["id", "pickup_datetime"] + FEATURES + ["trip_duration"]]
     assert not set(LEAKY_COLUMNS) & set(FEATURES), "Leaky column in FEATURES"
     return out
