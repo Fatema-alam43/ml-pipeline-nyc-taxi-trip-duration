@@ -1,0 +1,8 @@
+{
+  "pickup_latitude": 40.7580,
+  "pickup_longitude": -73.9855,
+  "dropoff_latitude": 40.6413,
+  "dropoff_longitude": -73.7781,
+  "pickup_datetime": "2016-06-15T17:30:00",
+  "passenger_count": 1
+}
