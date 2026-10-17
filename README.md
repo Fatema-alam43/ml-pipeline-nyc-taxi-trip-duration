@@ -59,7 +59,7 @@ flowchart LR
 
 ## Prediction API
 
-**Live demo:** TODO-API-URL (`/docs` for interactive documentation)
+**Live demo:** **Live demo:** https://ifksrlyyuqede7xad4naehovee0qrlno.lambda-url.ca-central-1.on.aws/ — click two points on the map (API docs at `/docs`)
 
 ![API demo](reports/figures/api_demo.gif)
 
@@ -70,10 +70,9 @@ curl -X POST https://<api-url>/predict -H "Content-Type: application/json" -d '{
   "pickup_datetime": "2016-06-15T17:30:00", "passenger_count": 1
 }'
 ```
-<!-- TODO-API-RESPONSE: replace with the real response from your deployed API -->
 ```json
-{"predicted_duration_minutes": ..., "predicted_duration_seconds": ..., "straight_line_distance_km": 21.77,
- "model_version": "...", "warnings": []}
+{"predicted_duration_minutes": 82.8, "predicted_duration_seconds": 4970.5, "straight_line_distance_km": 21.77,
+ "model_version": "34f8b97", "warnings": []}
 ```
 
 | Endpoint | What it does |
