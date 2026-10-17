@@ -53,7 +53,11 @@ class Tracker:
             if self.log_models:
                 signature = None
                 if input_example is not None:
+                    import warnings
+
                     from mlflow.models import infer_signature
-                    signature = infer_signature(input_example, model.predict(input_example))
+                    with warnings.catch_warnings():   # MLflow hint about integer columns: not relevant here
+                        warnings.simplefilter("ignore", UserWarning)
+                        signature = infer_signature(input_example, model.predict(input_example))
                 flavor = mlflow.lightgbm if kind == "lightgbm" else mlflow.sklearn
                 flavor.log_model(model, name="model", signature=signature)
