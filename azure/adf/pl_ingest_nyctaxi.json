@@ -1,0 +1,305 @@
+{
+    "name": "pl_ingest_nyctaxi",
+    "properties": {
+        "activities": [
+            {
+                "name": "CopyTripsToBronze",
+                "type": "Copy",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "DelimitedTextSource",
+                        "storeSettings": {
+                            "type": "AzureBlobFSReadSettings",
+                            "recursive": true,
+                            "enablePartitionDiscovery": false
+                        },
+                        "formatSettings": {
+                            "type": "DelimitedTextReadSettings"
+                        }
+                    },
+                    "sink": {
+                        "type": "ParquetSink",
+                        "storeSettings": {
+                            "type": "AzureBlobFSWriteSettings"
+                        },
+                        "formatSettings": {
+                            "type": "ParquetWriteSettings"
+                        }
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "ds_landing_csv",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "fileName": {
+                                "value": "@pipeline().parameters.tripsFile",
+                                "type": "Expression"
+                            }
+                        }
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "ds_bronze_parquet",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "fileName": "trips.parquet"
+                        }
+                    }
+                ]
+            },
+            {
+                "name": "CopyWeatherToBronze",
+                "type": "Copy",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "DelimitedTextSource",
+                        "storeSettings": {
+                            "type": "AzureBlobFSReadSettings",
+                            "recursive": true,
+                            "enablePartitionDiscovery": false
+                        },
+                        "formatSettings": {
+                            "type": "DelimitedTextReadSettings"
+                        }
+                    },
+                    "sink": {
+                        "type": "ParquetSink",
+                        "storeSettings": {
+                            "type": "AzureBlobFSWriteSettings"
+                        },
+                        "formatSettings": {
+                            "type": "ParquetWriteSettings"
+                        }
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "mappings": [
+                            {
+                                "source": {
+                                    "name": "date",
+                                    "type": "String",
+                                    "physicalType": "String"
+                                },
+                                "sink": {
+                                    "name": "date",
+                                    "type": "String",
+                                    "physicalType": "UTF8"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "maximum temperature",
+                                    "type": "String",
+                                    "physicalType": "String"
+                                },
+                                "sink": {
+                                    "name": "maximum_temperature",
+                                    "physicalType": "UTF8"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "minimum temperature",
+                                    "type": "String",
+                                    "physicalType": "String"
+                                },
+                                "sink": {
+                                    "name": "minimum_temperature",
+                                    "physicalType": "UTF8"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "average temperature",
+                                    "type": "String",
+                                    "physicalType": "String"
+                                },
+                                "sink": {
+                                    "name": "average_temperature",
+                                    "physicalType": "UTF8"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "precipitation",
+                                    "type": "String",
+                                    "physicalType": "String"
+                                },
+                                "sink": {
+                                    "name": "precipitation",
+                                    "type": "String",
+                                    "physicalType": "UTF8"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "snow fall",
+                                    "type": "String",
+                                    "physicalType": "String"
+                                },
+                                "sink": {
+                                    "name": "snow_fall",
+                                    "physicalType": "UTF8"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "snow depth",
+                                    "type": "String",
+                                    "physicalType": "String"
+                                },
+                                "sink": {
+                                    "name": "snow_depth",
+                                    "physicalType": "UTF8"
+                                }
+                            }
+                        ],
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "ds_landing_csv",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "fileName": {
+                                "value": "@pipeline().parameters.weatherFile",
+                                "type": "Expression"
+                            }
+                        }
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "ds_bronze_parquet",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "fileName": "weather.parquet"
+                        }
+                    }
+                ]
+            },
+            {
+                "name": "CheckRowCount",
+                "type": "IfCondition",
+                "state": "Active",
+                "onInactiveMarkAs": "Succeeded",
+                "dependsOn": [
+                    {
+                        "activity": "CopyTripsToBronze",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "expression": {
+                        "value": "@or(equals(activity('CopyTripsToBronze').output.rowsCopied, 1048575), equals(activity('CopyTripsToBronze').output.rowsCopied, 0))",
+                        "type": "Expression"
+                    },
+                    "ifTrueActivities": [
+                        {
+                            "name": "DeleteBadFile",
+                            "type": "Delete",
+                            "dependsOn": [],
+                            "policy": {
+                                "timeout": "0.12:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "dataset": {
+                                    "referenceName": "ds_bronze_parquet",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "fileName": "trips.parquet"
+                                    }
+                                },
+                                "enableLogging": false,
+                                "storeSettings": {
+                                    "type": "AzureBlobFSReadSettings",
+                                    "recursive": true,
+                                    "enablePartitionDiscovery": false
+                                }
+                            }
+                        },
+                        {
+                            "name": "FailPipeline",
+                            "type": "Fail",
+                            "dependsOn": [
+                                {
+                                    "activity": "DeleteBadFile",
+                                    "dependencyConditions": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            ],
+                            "userProperties": [],
+                            "typeProperties": {
+                                "message": {
+                                    "value": "@concat('Data quality check failed: the trips file has ', string(activity('CopyTripsToBronze').output.rowsCopied), ' rows. Exactly 1,048,575 rows means it was truncated by Excel (or it is empty). Re-download train.csv from Kaggle.')",
+                                    "type": "Expression"
+                                },
+                                "errorCode": {
+                                    "value": "`EXCEL_TRUNCATION`",
+                                    "type": "Expression"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        ],
+        "parameters": {
+            "tripsFile": {
+                "type": "string",
+                "defaultValue": "train.csv"
+            },
+            "weatherFile": {
+                "type": "string",
+                "defaultValue": "weather_nyc_centralpark_2016.csv"
+            }
+        },
+        "annotations": [],
+        "lastPublishTime": "2026-10-29T05:43:27Z"
+    },
+    "type": "Microsoft.DataFactory/factories/pipelines"
+}

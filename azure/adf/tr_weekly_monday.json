@@ -1,0 +1,33 @@
+{
+    "name": "tr_weekly_monday",
+    "properties": {
+        "annotations": [],
+        "runtimeState": "Started",
+        "pipelines": [
+            {
+                "pipelineReference": {
+                    "referenceName": "pl_ingest_nyctaxi",
+                    "type": "PipelineReference"
+                },
+                "parameters": {
+                    "tripsFile": "train.csv",
+                    "weatherFile": "weather_nyc_centralpark_2016.csv"
+                }
+            }
+        ],
+        "type": "ScheduleTrigger",
+        "typeProperties": {
+            "recurrence": {
+                "frequency": "Week",
+                "interval": 1,
+                "startTime": "2026-10-29T05:45:00",
+                "timeZone": "Eastern Standard Time",
+                "schedule": {
+                    "weekDays": [
+                        "Monday"
+                    ]
+                }
+            }
+        }
+    }
+}

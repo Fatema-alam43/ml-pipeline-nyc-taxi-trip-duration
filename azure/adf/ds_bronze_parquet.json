@@ -1,0 +1,29 @@
+{
+    "name": "ds_bronze_parquet",
+    "properties": {
+        "linkedServiceName": {
+            "referenceName": "ls_adls_nyctaxi",
+            "type": "LinkedServiceReference"
+        },
+        "parameters": {
+            "fileName": {
+                "type": "string"
+            }
+        },
+        "annotations": [],
+        "type": "Parquet",
+        "typeProperties": {
+            "location": {
+                "type": "AzureBlobFSLocation",
+                "fileName": {
+                    "value": "@dataset().fileName",
+                    "type": "Expression"
+                },
+                "fileSystem": "bronze"
+            },
+            "compressionCodec": "snappy"
+        },
+        "schema": []
+    },
+    "type": "Microsoft.DataFactory/factories/datasets"
+}
