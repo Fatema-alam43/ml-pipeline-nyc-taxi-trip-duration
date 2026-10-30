@@ -25,6 +25,7 @@
 7. [User stories and acceptance criteria](#user-stories-and-acceptance-criteria)
 8. [Data quality and testing](#data-quality-and-testing)
 9. [SQL layer, Spark and orchestration](#sql-layer-spark-and-orchestration)
+10. [Azure version](#azure-version-data-factory-databricks-and-power-bi)
 10. [Experiment tracking](#experiment-tracking)
 11. [Limitations](#limitations)
 12. [Future work](#future-work)
@@ -310,6 +311,99 @@ flowchart LR
 
 ---
 
+## Azure version: Data Factory, Databricks and Power BI
+
+The same pipeline also runs on **Microsoft Azure**, as a bronze → silver → gold lakehouse, and ends in a Power BI report for business users. It removes **exactly the same 15,704 rows** as the local pipeline.
+
+```mermaid
+flowchart LR
+    K[Kaggle CSVs] --> L[(ADLS Gen2<br/>landing)]
+    L --> A[Data Factory<br/>copy to Parquet<br/>+ row-count check]
+    A --> B[(bronze<br/>Parquet)]
+    B --> D[Databricks serverless<br/>PySpark notebook]
+    D --> S[(silver<br/>Delta: clean trips, features)]
+    D --> G[(gold<br/>Delta + CSV: 6 summary tables)]
+    G --> P[Power BI<br/>3-page report]
+    T[Weekly trigger<br/>Mondays 06:00] -. runs .-> A
+```
+
+| Layer | Service | What happens |
+|---|---|---|
+| **landing** | Azure Data Lake Storage Gen2 | Raw Kaggle files, exactly as downloaded |
+| **bronze** | Azure Data Factory | Copies CSV to Parquet, then checks the row count: a file with exactly **1,048,575 rows** (Excel's limit) is deleted and the pipeline fails with a clear message |
+| **silver** | Azure Databricks (serverless, PySpark) | The same 4 cleaning rules and 16 features as the local pipeline, saved as Delta tables; the notebook **fails itself** unless exactly 15,704 rows are removed |
+| **gold** | Azure Databricks | 6 small summary tables for reporting: daily KPIs with weather, hourly patterns, speed by area, airport vs other trips, weather impact, data quality |
+| **report** | Power BI | 3 pages built on the gold tables, with a date table and DAX measures |
+
+### Same answer in four engines
+
+The cleaning step was implemented four times and gives the same result every time:
+
+| Engine | Rows removed | Clean trips |
+|---|---|---|
+| pandas | 15,704 | 1,442,940 |
+| DuckDB SQL | 15,704 | 1,442,940 |
+| PySpark (local) | 15,704 | 1,442,940 |
+| **Azure Databricks (serverless)** | **15,704** | **1,442,940** |
+
+Including the 997 trips on the edge of the NYC boundary, where a 64-bit instead of 32-bit comparison would have changed the count by one.
+
+![Databricks cleaning check](reports/figures/azure_databricks_cleaning.png)
+
+### Data Factory: ingestion and the data-quality check
+
+| Pipeline | Excel-truncated file rejected |
+|---|---|
+| ![ADF pipeline](reports/figures/azure_adf_pipeline.png) | ![ADF failed run](reports/figures/azure_adf_excel_check.png) |
+| Copy trips and weather to bronze as Parquet, then check the row count | Test with a 1,048,575-row file: the bad copy is deleted and the run fails on purpose |
+
+The pipeline runs every Monday at 06:00 (Toronto time) through a schedule trigger. Pipeline, dataset, linked service and trigger definitions are in [`azure/adf/`](azure/adf/).
+
+### Power BI report
+
+| Overview | When and where |
+|---|---|
+| ![Power BI overview](reports/figures/powerbi_overview.png) | ![Power BI when and where](reports/figures/powerbi_when_where.png) |
+
+![Power BI weather and data quality](reports/figures/powerbi_weather_quality.png)
+
+- **Overview:** 1,442,940 clean trips; airport trips are **6.6%** of all trips and take **35.4 minutes** on average vs **12.5** for other trips; the January blizzard shows as a sharp dip in daily trips.
+- **When and where:** an hour × weekday/weekend heatmap (weekday afternoons are slowest, about 17 minutes at 4 p.m.) and a map of median speed by pickup area.
+- **Weather and data quality:** days with snow on the ground had **16% fewer trips**; rainy days were not slower; **1.1%** of raw trips failed the cleaning rules.
+- DAX: a marked date table, a 7-day rolling average (`DATESINPERIOD`), a trip-weighted average duration (`SUMX`), and filtered share measures (`CALCULATE`).
+
+The report file and a PDF export are in [`azure/powerbi/`](azure/powerbi/); the PDF opens without Power BI.
+
+### Security and cost
+
+- **No keys in code.** Data Factory reads and writes the lake with its **managed identity**; Databricks uses a **Unity Catalog storage credential** backed by an Access Connector (a managed identity with the Storage Blob Data Contributor role) and three external locations, one per container.
+- **Runs on Azure for Students credit.** Serverless Databricks charges only while the notebook runs (a full run takes a few minutes); storage and Data Factory cost cents per month.
+- Why serverless: the student subscription could not start classic clusters in Canada Central (the available VM sizes were out of capacity), so the notebook runs on Databricks serverless compute, which also avoids managing clusters.
+
+### What is not automated yet
+
+The Data Factory pipeline (ingestion and the row-count check) runs on a weekly schedule; the Databricks notebook is currently run on demand after ingestion. Connecting it as the final pipeline step is listed under future work.
+
+<details>
+<summary>More screenshots: successful run, trigger, lake containers, Databricks results</summary>
+
+| Successful pipeline run | Weekly trigger |
+|---|---|
+| ![ADF success](reports/figures/azure_adf_success.png) | ![ADF trigger](reports/figures/azure_adf_trigger.png) |
+
+| Landing container | Silver container | Gold container |
+|---|---|---|
+| ![Landing](reports/figures/azure_landing.png) | ![Silver](reports/figures/azure_silver_container.png) | ![Gold](reports/figures/azure_gold_container.png) |
+
+| Bronze row count | Results: airport, weather, slowest days |
+|---|---|
+| ![Bronze](reports/figures/azure_databricks_bronze.png) | ![Results](reports/figures/azure_databricks_results.png) |
+
+</details>
+
+
+---
+
 ## Experiment tracking
 
 Every model run is logged to **MLflow** with its parameters, metrics, feature list, git commit and model file (10 runs per pipeline run: baselines, the tuned model, Linear Regression, and weather experiments on both splits).
@@ -337,6 +431,7 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5001
 
 ## Future work
 
+- **Azure:** run the Databricks notebook as the final Data Factory step, so the weekly run goes from raw files to refreshed Power BI tables without manual steps.
 - **Better accuracy:** road distances and travel times from a routing engine (e.g. OSRM), hourly weather and event data, and quantile models that return a time range instead of a single number.
 - **Honest model selection:** rolling time-based validation (backtesting over several months) to choose features and settings, and retraining on the most recent data.
 - **More, newer data:** the full NYC TLC trip records (billions of trips, through recent years) with the Spark pipeline on a cluster (AWS EMR or Databricks).
@@ -380,6 +475,10 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5001
 │   ├── model.py                 # loads the model from a file or S3
 │   └── static/index.html        # interactive map page
 ├── deploy/                      # AWS Lambda deploy and teardown scripts
+├── azure/
+│   ├── adf/                     # Data Factory pipeline, datasets, linked service, trigger (JSON)
+│   ├── databricks/              # bronze → silver → gold notebook (PySpark)
+│   └── powerbi/                 # report (.pbix) and PDF export
 ├── docs/deploy_aws.md           # deployment guide
 ├── scripts/
 │   ├── download_data.py         # downloads and verifies the Kaggle data
